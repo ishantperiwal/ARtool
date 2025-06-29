@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>WebXR AR Cube</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/main.css">
+    <style>
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            display:block;
+            padding: 10px;
+        }
+        #ar-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 8px;
+            background-color: #4A90E2;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            z-index: 101;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        #ar-button:hover {
+            background-color: #357ABD;
+        }
+         #ar-button:active {
+            transform: translateX(-50%) scale(0.95);
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        Point your camera at a surface and tap the "Start AR" button.
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { ARButton } from 'three/addons/webxr/ARButton.js';
+
+        let container;
+        let camera, scene, renderer;
+        let controller;
+        let cube;
+
+        init();
+        animate();
+
+        function init() {
+            // Create the main container
+            container = document.createElement('div');
+            document.body.appendChild(container);
+
+            // Create the scene
+            scene = new THREE.Scene();
+
+            // Create the camera
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+            // Add lighting
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            light.position.set(0.5, 1, 0.25);
+            scene.add(light);
+
+            // Create the renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // Add the AR button to the DOM
+            document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+
+            // Create the cube geometry and material
+            const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0xffffff * Math.random(), // Random color
+                roughness: 0.7,
+                metalness: 0.0
+             });
+
+            // Create the cube mesh
+            cube = new THREE.Mesh(geometry, material);
+            
+            // Set initial random position (will be updated on session start)
+            cube.position.set(
+                (Math.random() - 0.5) * 2,
+                0.2,
+                (Math.random() - 0.5) * 2 - 1
+            );
+            
+            scene.add(cube);
+
+
+            // Handle window resizing
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Listen for AR session start
+            renderer.xr.addEventListener('sessionstart', onSessionStart);
+        }
+
+        function onSessionStart() {
+            // Place the cube randomly in front of the user
+            const newX = (Math.random() - 0.5) * 2; // -1 to 1
+            const newY = (Math.random() * 0.5) + 0.1; // 0.1 to 0.6
+            const newZ = - (Math.random() * 2) - 1; // -1 to -3
+            
+            cube.position.set(newX, newY, newZ);
+            
+            // Change color on session start as well
+            cube.material.color.setHex(0xffffff * Math.random());
+        }
+
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render() {
+            // Rotate the cube
+            if (cube) {
+                cube.rotation.y += 0.01;
+                cube.rotation.x += 0.005;
+            }
+            renderer.render(scene, camera);
+        }
+
+    </script>
+</body>
+</html>
