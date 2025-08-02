@@ -15,7 +15,6 @@
             margin: 0;
             overflow: hidden; /* Prevent scrolling */
         }
-        /* The AR container will be hidden initially */
         #ar-container {
             position: fixed;
             top: 0;
@@ -23,9 +22,8 @@
             width: 100%;
             height: 100%;
             z-index: 1;
-            display: none; /* Hidden by default */
+            display: none; 
         }
-        /* The map container takes the full screen initially */
         #map-container {
             position: fixed;
             top: 0;
@@ -42,26 +40,41 @@
             color: white;
             padding: 8px 12px;
             border-radius: 8px;
-            z-index: 10; /* Ensure it's on top of map and AR */
+            z-index: 10;
             max-width: 300px;
         }
-        /* Hide the default AR button created by Three.js */
         #ar-button { display: none !important; }
+
+        /* UPDATED: Styling for the loading indicator */
+        #loading-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 99;
+            display: none; /* Hidden by default */
+            font-size: 1.2em;
+        }
     </style>
 </head>
 <body class="bg-black text-white">
 
     <!-- The AR view will be populated by Three.js -->
-    <div id="ar-container"></div>
+    <div id="ar-container">
+        <!-- UPDATED: Added a loading indicator for placing pins -->
+        <div id="loading-indicator">Loading Pins...</div>
+    </div>
 
     <!-- The Map view is the default view -->
     <div id="map-container">
         <div id="map" class="w-full h-full"></div>
-        <!-- Button to enter the AR experience -->
         <button id="enter-ar-button" class="absolute bottom-10 left-1/2 -translate-x-1/2 z-10 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-full shadow-lg transition-transform transform hover:scale-105">
             Go Inside AR
         </button>
-        <!-- Button to delete all saved pins -->
         <button id="delete-all-pins-button" class="absolute top-4 right-4 z-10 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
             Delete All Pins
         </button>
@@ -82,10 +95,6 @@
         }
     </script>
 
-    <!-- 
-      This module script, which defines 'initApp', is placed BEFORE 
-      the Google Maps script that calls it. This prevents race condition errors.
-    -->
     <script type="module">
         // Three.js Imports
         import * as THREE from 'three';
@@ -98,10 +107,13 @@
         let hitTestSource = null;
         let hitTestSourceRequested = false;
 
-        let googleMap; // To hold the Google Map instance
-        let allPinData = []; // Holds data for all pins (loaded and new)
-        let arPinsInScene = []; // Holds Three.js objects for pins in the current AR session
-        let arReady = false; // Flag to check if AR has been initialized
+        let googleMap;
+        let allPinData = [];
+        let arPinsInScene = [];
+        let arReady = false;
+
+        // UPDATED: Variable to store the device's compass heading for accuracy
+        let deviceHeading = 0;
 
         // --- APPLICATION INITIALIZATION ---
         window.initApp = () => {
@@ -109,6 +121,8 @@
             watchGPS();
             setupEnterARButton();
             setupDeleteButton(); 
+            // UPDATED: Set up device orientation to get compass data
+            setupDeviceOrientation();
         };
 
         // --- MAP FUNCTIONS ---
@@ -137,7 +151,6 @@
                     arReady = true;
                 }
                 
-                // UPDATED: Recreate saved pins in the AR scene every time we enter.
                 placeExistingPinsInAR();
                 
                 document.getElementById('ar-button').click();
@@ -153,7 +166,37 @@
             });
         }
 
-        // --- AR INITIALIZATION ---
+        // --- AR & SENSOR INITIALIZATION ---
+        
+        // UPDATED: New function to get compass heading for pin placement accuracy
+        function setupDeviceOrientation() {
+            // Feature detection for DeviceOrientationEvent
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // iOS 13+ requires user permission for device orientation events
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        } else {
+                            updateStatus("Permission for device orientation not granted.");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // For other browsers (e.g., Android)
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
+        }
+
+        function handleOrientation(event) {
+            // 'webkitCompassHeading' is for iOS and is the most reliable.
+            // 'alpha' is the fallback for other devices, representing rotation around z-axis.
+            const heading = event.webkitCompassHeading || event.alpha;
+            if (heading !== null) {
+                deviceHeading = heading;
+            }
+        }
+
         function initAR() {
             const arContainer = document.getElementById('ar-container');
             scene = new THREE.Scene();
@@ -199,9 +242,7 @@
             if (savedPinsJSON) {
                 allPinData = JSON.parse(savedPinsJSON);
                 updateStatus(`Loaded ${allPinData.length} pins from local storage.`);
-                allPinData.forEach(pinData => {
-                    placeMarkerOnMap(pinData);
-                });
+                allPinData.forEach(pinData => placeMarkerOnMap(pinData));
             } else {
                 updateStatus("No pins found in local storage. Place a new one in AR!");
             }
@@ -215,10 +256,11 @@
         }
 
         // --- CORE AR + GPS LOGIC ---
-
-        // UPDATED: New function to place existing pins in AR
         function placeExistingPinsInAR() {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            loadingIndicator.style.display = 'block'; // Show loading indicator
             updateStatus("Locating you to place saved pins...");
+
             navigator.geolocation.getCurrentPosition(position => {
                 const userLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
                 
@@ -227,29 +269,28 @@
                 allPinData.forEach(pinData => {
                     const pinLocation = new google.maps.LatLng(pinData.lat, pinData.lon);
 
-                    // Calculate distance and heading from user to the pin
                     const distance = google.maps.geometry.spherical.computeDistanceBetween(userLocation, pinLocation);
-                    const heading = google.maps.geometry.spherical.computeHeading(userLocation, pinLocation);
+                    const pinHeading = google.maps.geometry.spherical.computeHeading(userLocation, pinLocation);
                     
-                    // Convert distance and heading to 3D coordinates.
-                    // NOTE: This doesn't account for device compass orientation, so pins are placed relative to North.
-                    // Z is negative for "forward" in Three.js's default camera setup.
-                    const x = distance * Math.sin(heading * Math.PI / 180);
-                    const z = -distance * Math.cos(heading * Math.PI / 180);
+                    // UPDATED: Improve accuracy by accounting for the device's current compass heading.
+                    // This calculates the pin's direction relative to where the user is currently looking.
+                    const relativeHeading = pinHeading - deviceHeading;
+                    
+                    const x = distance * Math.sin(relativeHeading * Math.PI / 180);
+                    const z = -distance * Math.cos(relativeHeading * Math.PI / 180);
 
-                    // Place the pin on the floor (y=0) at the calculated position.
                     const pinPosition = new THREE.Vector3(x, 0, z);
-                    
-                    // Use 'false' for 'isNew' to give it the "old pin" color.
                     placePinInScene(pinPosition, pinData, false);
                 });
+                
+                loadingIndicator.style.display = 'none'; // Hide loading indicator
 
             }, (error) => {
                 console.error("GPS Error:", error);
                 updateStatus(`Could not get your location to place saved pins: ${error.message}`);
+                loadingIndicator.style.display = 'none'; // Hide loading indicator on error
             }, { enableHighAccuracy: true });
         }
-
 
         function onSelect() {
             if (reticle.visible) {
@@ -279,22 +320,17 @@
         }
 
         function placePinInScene(position, data, isNew) {
-            // Avoid adding duplicate pins to the AR scene
-            if (arPinsInScene.some(p => p.userData.id === data.id)) {
-                return;
-            }
+            if (arPinsInScene.some(p => p.userData.id === data.id)) return;
 
             const geometry = new THREE.CylinderGeometry(0.01, 0.08, 0.4, 32);
             const material = new THREE.MeshStandardMaterial({
-                color: isNew ? 0xff3366 : 0xffff00, // Red for new, Yellow for old
+                color: isNew ? 0xff3366 : 0xffff00,
                 metalness: 0.4,
                 roughness: 0.6
             });
             const pin = new THREE.Mesh(geometry, material);
             
             pin.position.copy(position);
-            // For existing pins placed via GPS, we might want to adjust their Y position
-            // once a surface is found, but for now, we place them slightly above the floor.
             pin.position.y += 0.2; 
             
             pin.userData = data; 
@@ -375,7 +411,6 @@
                         hitTestSourceRequested = false;
                         hitTestSource = null;
 
-                        // Clean up AR objects from the scene for the next session
                         arPinsInScene.forEach(pin => scene.remove(pin));
                         arPinsInScene = [];
 
@@ -413,10 +448,6 @@
         }
     </script>
 
-    <!-- 
-      The Google Maps script is placed AFTER the module script. 
-      The 'defer' attribute ensures it runs after the page is parsed and our script is ready.
-    -->
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDKFpUFxl8pfNSbx0GlQhmvFaHePoBxhKs&callback=initApp&libraries=geometry" defer></script>
 
 </body>
