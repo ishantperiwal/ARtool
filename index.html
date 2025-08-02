@@ -32,6 +32,7 @@
             height: 100%;
             z-index: 2;
         }
+        /* UPDATED: Info panel is now a top-level overlay */
         #info-panel {
             position: fixed;
             top: 10px;
@@ -42,12 +43,13 @@
             border-radius: 8px;
             z-index: 10;
             max-width: 300px;
+            display: none; /* Hidden by default, controlled by JS */
         }
         #ar-button { display: none !important; }
 
-        /* Styling for the loading indicator */
+        /* UPDATED: Loading indicator is now a top-level overlay */
         #loading-indicator {
-            position: absolute;
+            position: fixed; /* Changed from absolute to fixed */
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
@@ -64,15 +66,7 @@
 <body class="bg-black text-white">
 
     <!-- The AR view will be populated by Three.js -->
-    <div id="ar-container">
-        <div id="loading-indicator">Loading Pins...</div>
-        <!-- UPDATED: Moved info-panel inside the AR container to ensure it's visible during the AR session -->
-        <div id="info-panel">
-            <p id="status">Welcome! Loading map...</p>
-            <p id="coords">Lat/Lon: N/A</p>
-            <p id="reticle-coords">Reticle (X, Z): N/A</p>
-        </div>
-    </div>
+    <div id="ar-container"></div>
 
     <!-- The Map view is the default view -->
     <div id="map-container">
@@ -85,6 +79,14 @@
         </button>
     </div>
     
+    <!-- UPDATED: Moved info-panel and loading-indicator to be direct children of the body -->
+    <div id="loading-indicator">Loading Pins...</div>
+    <div id="info-panel">
+        <p id="status">Welcome! Loading map...</p>
+        <p id="coords">Lat/Lon: N/A</p>
+        <p id="reticle-coords">Reticle (X, Z): N/A</p>
+    </div>
+
     <script type="importmap">
         {
             "imports": {
@@ -142,6 +144,8 @@
             enterARButton.addEventListener('click', () => {
                 document.getElementById('map-container').style.display = 'none';
                 document.getElementById('ar-container').style.display = 'block';
+                // UPDATED: Manually show the info panel for the AR session
+                document.getElementById('info-panel').style.display = 'block';
 
                 if (!arReady) {
                     initAR();
@@ -357,10 +361,10 @@
             navigator.geolocation.watchPosition(
                 (position) => {
                     const { latitude, longitude } = position.coords;
+                    // UPDATED: Simplified selector
                     document.getElementById('coords').textContent = `Lat/Lon: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
                     if (googleMap && !renderer?.xr.isPresenting) {
-                        // When not in AR, update the status panel on the map screen
-                        document.querySelector('#map-container + #info-panel #status').textContent = 'Watching your location...';
+                        googleMap.setCenter({ lat: latitude, lng: longitude });
                     }
                 },
                 () => { updateStatus("Unable to retrieve your location."); },
@@ -379,8 +383,8 @@
 
         function updateStatus(message) {
             console.log(message);
-            // Update the status in the info panel, which is now inside the AR container
-            document.querySelector('#info-panel #status').textContent = message;
+            // UPDATED: Simplified selector
+            document.getElementById('status').textContent = message;
         }
 
         // --- RENDER LOOP ---
@@ -406,14 +410,14 @@
 
                         document.getElementById('ar-container').style.display = 'none';
                         document.getElementById('map-container').style.display = 'block';
+                        // UPDATED: Manually hide the info panel when exiting AR
+                        document.getElementById('info-panel').style.display = 'none';
 
                         if (allPinData.length > 0) {
                             const lastPin = allPinData[allPinData.length - 1];
                             googleMap.setCenter({ lat: lastPin.lat, lng: lastPin.lon });
                             googleMap.setZoom(20);
                         }
-                        // When exiting AR, update the status on the map screen's panel if we were to have one
-                        // For now, we just log it.
                         console.log("Exited AR. View your pins on the map.");
                     });
                     hitTestSourceRequested = true;
