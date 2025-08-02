@@ -61,7 +61,7 @@
         <button id="enter-ar-button" class="absolute bottom-10 left-1/2 -translate-x-1/2 z-10 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-full shadow-lg transition-transform transform hover:scale-105">
             Go Inside AR
         </button>
-        <!-- UPDATED: Button to delete all saved pins -->
+        <!-- Button to delete all saved pins -->
         <button id="delete-all-pins-button" class="absolute top-4 right-4 z-10 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
             Delete All Pins
         </button>
@@ -104,18 +104,15 @@
         let arReady = false; // Flag to check if AR has been initialized
 
         // --- APPLICATION INITIALIZATION ---
-        // We attach our main function to the window object so the Google Maps callback can find it.
         window.initApp = () => {
             initMap();
             watchGPS();
             setupEnterARButton();
-            // UPDATED: Setup the new delete button
             setupDeleteButton(); 
         };
 
         // --- MAP FUNCTIONS ---
         function initMap() {
-            // Default location set to Limerick, Ireland
             const initialLocation = { lat: 52.6638, lng: -8.6267 }; 
             googleMap = new google.maps.Map(document.getElementById("map"), {
                 center: initialLocation,
@@ -132,26 +129,24 @@
         function setupEnterARButton() {
             const enterARButton = document.getElementById('enter-ar-button');
             enterARButton.addEventListener('click', () => {
-                // Switch views from Map to AR
                 document.getElementById('map-container').style.display = 'none';
                 document.getElementById('ar-container').style.display = 'block';
 
-                // Initialize AR on the first click only
                 if (!arReady) {
                     initAR();
                     arReady = true;
                 }
                 
-                // Programmatically click the hidden Three.js AR button to start the WebXR session
+                // UPDATED: Recreate saved pins in the AR scene every time we enter.
+                placeExistingPinsInAR();
+                
                 document.getElementById('ar-button').click();
             });
         }
         
-        // UPDATED: New function to set up the delete all pins button
         function setupDeleteButton() {
             const deleteButton = document.getElementById('delete-all-pins-button');
             deleteButton.addEventListener('click', () => {
-                // A simple confirmation before deleting
                 if (confirm("Are you sure you want to delete all saved pins? This cannot be undone.")) {
                     deleteAllPins();
                 }
@@ -164,23 +159,19 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 40);
 
-            // Add basic lighting to the scene
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
-            // Setup the renderer for WebXR
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             arContainer.appendChild(renderer.domElement);
 
-            // Create the real AR button from Three.js but keep it hidden. We trigger it with our own button.
             const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
             document.body.appendChild(arButton);
 
-            // Create the reticle (the circle that shows where you can place an object)
             reticle = new THREE.Mesh(
                 new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0x4A90E2 })
@@ -189,13 +180,11 @@
             reticle.visible = false;
             scene.add(reticle);
 
-            // Setup the controller for tap events
             controller = renderer.xr.getController(0);
             controller.addEventListener('select', onSelect);
             scene.add(controller);
 
             window.addEventListener('resize', onWindowResize);
-            // Start the render loop
             renderer.setAnimationLoop(render);
         }
 
@@ -210,7 +199,6 @@
             if (savedPinsJSON) {
                 allPinData = JSON.parse(savedPinsJSON);
                 updateStatus(`Loaded ${allPinData.length} pins from local storage.`);
-                // Add markers on the map for each loaded pin
                 allPinData.forEach(pinData => {
                     placeMarkerOnMap(pinData);
                 });
@@ -219,39 +207,68 @@
             }
         }
         
-        // UPDATED: New function to delete all pins
         function deleteAllPins() {
-            // Clear the data from the array
             allPinData = [];
-            // Remove the data from local storage
             localStorage.removeItem('ar_gps_pins');
             updateStatus("All pins have been deleted.");
-            // Reload the page to clear the map and reset the view
             location.reload();
         }
 
         // --- CORE AR + GPS LOGIC ---
+
+        // UPDATED: New function to place existing pins in AR
+        function placeExistingPinsInAR() {
+            updateStatus("Locating you to place saved pins...");
+            navigator.geolocation.getCurrentPosition(position => {
+                const userLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+                
+                updateStatus(`Found you! Placing ${allPinData.length} saved pins.`);
+
+                allPinData.forEach(pinData => {
+                    const pinLocation = new google.maps.LatLng(pinData.lat, pinData.lon);
+
+                    // Calculate distance and heading from user to the pin
+                    const distance = google.maps.geometry.spherical.computeDistanceBetween(userLocation, pinLocation);
+                    const heading = google.maps.geometry.spherical.computeHeading(userLocation, pinLocation);
+                    
+                    // Convert distance and heading to 3D coordinates.
+                    // NOTE: This doesn't account for device compass orientation, so pins are placed relative to North.
+                    // Z is negative for "forward" in Three.js's default camera setup.
+                    const x = distance * Math.sin(heading * Math.PI / 180);
+                    const z = -distance * Math.cos(heading * Math.PI / 180);
+
+                    // Place the pin on the floor (y=0) at the calculated position.
+                    const pinPosition = new THREE.Vector3(x, 0, z);
+                    
+                    // Use 'false' for 'isNew' to give it the "old pin" color.
+                    placePinInScene(pinPosition, pinData, false);
+                });
+
+            }, (error) => {
+                console.error("GPS Error:", error);
+                updateStatus(`Could not get your location to place saved pins: ${error.message}`);
+            }, { enableHighAccuracy: true });
+        }
+
+
         function onSelect() {
-            // This function is called when the user taps the screen in AR mode
             if (reticle.visible) {
-                updateStatus("Getting precise location...");
-                // Get high-accuracy GPS coordinates for the new pin
+                updateStatus("Getting precise location to save new pin...");
                 navigator.geolocation.getCurrentPosition((position) => {
                     const { latitude, longitude, altitude } = position.coords;
                     const pinData = {
                         lat: latitude,
                         lon: longitude,
-                        alt: altitude || 0, // Use 0 if altitude is not available
-                        id: `pin_${Date.now()}`, // Unique ID for the pin
+                        alt: altitude || 0,
+                        id: `pin_${Date.now()}`,
                         createdAt: Date.now()
                     };
                     
                     allPinData.push(pinData);
                     savePinsToLocalStorage();
 
-                    // Get the 3D position from the reticle and place the pin
                     const pinPosition = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
-                    placePinInScene(pinPosition, pinData, true); // `true` for new pin color
+                    placePinInScene(pinPosition, pinData, true); 
                     placeMarkerOnMap(pinData);
 
                 }, (error) => {
@@ -262,7 +279,11 @@
         }
 
         function placePinInScene(position, data, isNew) {
-            // Creates the 3D model for the pin
+            // Avoid adding duplicate pins to the AR scene
+            if (arPinsInScene.some(p => p.userData.id === data.id)) {
+                return;
+            }
+
             const geometry = new THREE.CylinderGeometry(0.01, 0.08, 0.4, 32);
             const material = new THREE.MeshStandardMaterial({
                 color: isNew ? 0xff3366 : 0xffff00, // Red for new, Yellow for old
@@ -272,20 +293,21 @@
             const pin = new THREE.Mesh(geometry, material);
             
             pin.position.copy(position);
-            pin.position.y += 0.2; // Raise the pin slightly so it sits on the surface
+            // For existing pins placed via GPS, we might want to adjust their Y position
+            // once a surface is found, but for now, we place them slightly above the floor.
+            pin.position.y += 0.2; 
             
-            pin.userData = data; // Store GPS data with the 3D object
+            pin.userData = data; 
             scene.add(pin);
             arPinsInScene.push(pin);
         }
 
         function placeMarkerOnMap(data) {
-            // Places a standard Google Maps marker
             if (!googleMap) return;
 
             const starIcon = {
                 path: 'M 12,2.5 L 14.3,7.7 L 20,8.5 L 16,12.3 L 17,18 L 12,15.2 L 7,18 L 8,12.3 L 4,8.5 L 9.7,7.7 Z',
-                fillColor: '#FFD700', // Gold color for the star
+                fillColor: '#FFD700',
                 fillOpacity: 1,
                 strokeWeight: 0,
                 rotation: 0,
@@ -308,12 +330,10 @@
                 updateStatus("Geolocation is not supported by your browser.");
                 return;
             }
-            // Continuously watch the user's position
             navigator.geolocation.watchPosition(
                 (position) => {
                     const { latitude, longitude } = position.coords;
                     document.getElementById('coords').textContent = `Lat/Lon: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
-                    // Center the map on the user's location when not in AR
                     if (googleMap && !renderer?.xr.isPresenting) {
                         googleMap.setCenter({ lat: latitude, lng: longitude });
                     }
@@ -339,7 +359,7 @@
 
         // --- RENDER LOOP ---
         function render(timestamp, frame) {
-            if (!renderer) return; // Don't render if AR not initialized
+            if (!renderer) return; 
 
             if (renderer.xr.isPresenting && frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
@@ -352,19 +372,16 @@
                         });
                     });
                     session.addEventListener('end', () => {
-                        // This event is triggered when exiting AR mode
                         hitTestSourceRequested = false;
                         hitTestSource = null;
 
-                        // Clean up AR objects from the scene to prevent duplicates
+                        // Clean up AR objects from the scene for the next session
                         arPinsInScene.forEach(pin => scene.remove(pin));
                         arPinsInScene = [];
 
-                        // Switch back to the map view
                         document.getElementById('ar-container').style.display = 'none';
                         document.getElementById('map-container').style.display = 'block';
 
-                        // Center map on the last pin placed
                         if (allPinData.length > 0) {
                             const lastPin = allPinData[allPinData.length - 1];
                             googleMap.setCenter({ lat: lastPin.lat, lng: lastPin.lon });
@@ -380,7 +397,6 @@
                     if (hitTestResults.length) {
                         const hit = hitTestResults[0];
                         reticle.visible = true;
-                        // Position the reticle at the detected hit point
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
                     } else {
                         reticle.visible = false;
@@ -388,10 +404,9 @@
                 }
             }
 
-            // Animate pins in the scene
             if (arReady) {
                 arPinsInScene.forEach(pin => {
-                    pin.rotation.y += 0.01; // Gently rotate the pins
+                    pin.rotation.y += 0.01; 
                 });
                 renderer.render(scene, camera);
             }
