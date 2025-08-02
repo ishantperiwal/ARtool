@@ -4,14 +4,11 @@
     <title>WebXR AR GPS Pins with Local Storage</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 
-      FIX: Removed 'async' and kept 'defer'. 
-      This ensures this script runs after the page is parsed and in order, 
-      preventing the race condition with our module script below.
-    -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initApp&libraries=geometry" defer></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -81,6 +78,10 @@
         }
     </script>
 
+    <!-- 
+      This module script, which defines 'initApp', is placed BEFORE 
+      the Google Maps script that calls it. This prevents race condition errors.
+    -->
     <script type="module">
         // Three.js Imports
         import * as THREE from 'three';
@@ -106,12 +107,15 @@
             setupEnterARButton();
         };
 
+        // --- MAP FUNCTIONS ---
         function initMap() {
-            const initialLocation = { lat: 52.6638, lng: -8.6267 }; // Default to Limerick, Ireland
+            // Default location set to Limerick, Ireland
+            const initialLocation = { lat: 52.6638, lng: -8.6267 }; 
             googleMap = new google.maps.Map(document.getElementById("map"), {
                 center: initialLocation,
                 zoom: 18,
-                mapTypeId: 'satellite',
+                // UPDATED: Changed map type from 'satellite' to 'roadmap' for the simple view
+                mapTypeId: 'roadmap', 
                 disableDefaultUI: true,
                 gestureHandling: 'greedy'
             });
@@ -119,43 +123,48 @@
             loadPinsFromLocalStorage();
         }
 
+        // --- UI SETUP ---
         function setupEnterARButton() {
             const enterARButton = document.getElementById('enter-ar-button');
             enterARButton.addEventListener('click', () => {
-                // Switch views
+                // Switch views from Map to AR
                 document.getElementById('map-container').style.display = 'none';
                 document.getElementById('ar-container').style.display = 'block';
 
-                // Initialize AR on first click
+                // Initialize AR on the first click only
                 if (!arReady) {
                     initAR();
                     arReady = true;
                 }
                 
-                // Programmatically click the hidden Three.js AR button to start the session
+                // Programmatically click the hidden Three.js AR button to start the WebXR session
                 document.getElementById('ar-button').click();
             });
         }
 
+        // --- AR INITIALIZATION ---
         function initAR() {
             const arContainer = document.getElementById('ar-container');
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 40);
 
+            // Add basic lighting to the scene
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
+            // Setup the renderer for WebXR
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             arContainer.appendChild(renderer.domElement);
 
-            // Create the real AR button but keep it hidden
+            // Create the real AR button from Three.js but keep it hidden. We trigger it with our own button.
             const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
             document.body.appendChild(arButton);
 
+            // Create the reticle (the circle that shows where you can place an object)
             reticle = new THREE.Mesh(
                 new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0x4A90E2 })
@@ -164,11 +173,13 @@
             reticle.visible = false;
             scene.add(reticle);
 
+            // Setup the controller for tap events
             controller = renderer.xr.getController(0);
             controller.addEventListener('select', onSelect);
             scene.add(controller);
 
             window.addEventListener('resize', onWindowResize);
+            // Start the render loop
             renderer.setAnimationLoop(render);
         }
 
@@ -183,24 +194,27 @@
             if (savedPinsJSON) {
                 allPinData = JSON.parse(savedPinsJSON);
                 updateStatus(`Loaded ${allPinData.length} pins from cache.`);
+                // Add markers on the map for each loaded pin
                 allPinData.forEach(pinData => {
                     placeMarkerOnMap(pinData);
                 });
             } else {
-                updateStatus("No pins found in cache. Place a new one!");
+                updateStatus("No pins found in cache. Place a new one in AR!");
             }
         }
 
         // --- CORE AR + GPS LOGIC ---
         function onSelect() {
+            // This function is called when the user taps the screen in AR mode
             if (reticle.visible) {
                 updateStatus("Getting precise location...");
+                // Get high-accuracy GPS coordinates for the new pin
                 navigator.geolocation.getCurrentPosition((position) => {
                     const { latitude, longitude, altitude } = position.coords;
                     const pinData = {
                         lat: latitude,
                         lon: longitude,
-                        alt: altitude || 0,
+                        alt: altitude || 0, // Use 0 if altitude is not available
                         id: `pin_${Date.now()}`, // Unique ID for the pin
                         createdAt: Date.now()
                     };
@@ -208,8 +222,9 @@
                     allPinData.push(pinData);
                     savePinsToLocalStorage();
 
+                    // Get the 3D position from the reticle and place the pin
                     const pinPosition = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
-                    placePinInScene(pinPosition, pinData, true);
+                    placePinInScene(pinPosition, pinData, true); // `true` for new pin color
                     placeMarkerOnMap(pinData);
 
                 }, (error) => {
@@ -220,23 +235,25 @@
         }
 
         function placePinInScene(position, data, isNew) {
+            // Creates the 3D model for the pin
             const geometry = new THREE.CylinderGeometry(0.01, 0.08, 0.4, 32);
             const material = new THREE.MeshStandardMaterial({
-                color: isNew ? 0xff3366 : 0xffff00,
+                color: isNew ? 0xff3366 : 0xffff00, // Red for new, Yellow for old
                 metalness: 0.4,
                 roughness: 0.6
             });
             const pin = new THREE.Mesh(geometry, material);
             
             pin.position.copy(position);
-            pin.position.y += 0.2;
+            pin.position.y += 0.2; // Raise the pin slightly so it sits on the surface
             
-            pin.userData = data;
+            pin.userData = data; // Store GPS data with the 3D object
             scene.add(pin);
             arPinsInScene.push(pin);
         }
 
         function placeMarkerOnMap(data) {
+            // Places a standard Google Maps marker
             if (!googleMap) return;
             const marker = new google.maps.Marker({
                 position: { lat: data.lat, lng: data.lon },
@@ -252,10 +269,12 @@
                 updateStatus("Geolocation is not supported by your browser.");
                 return;
             }
+            // Continuously watch the user's position
             navigator.geolocation.watchPosition(
                 (position) => {
                     const { latitude, longitude } = position.coords;
                     document.getElementById('coords').textContent = `Lat/Lon: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+                    // Center the map on the user's location when not in AR
                     if (googleMap && !renderer?.xr.isPresenting) {
                         googleMap.setCenter({ lat: latitude, lng: longitude });
                     }
@@ -294,11 +313,11 @@
                         });
                     });
                     session.addEventListener('end', () => {
-                        // This is triggered when exiting AR
+                        // This event is triggered when exiting AR mode
                         hitTestSourceRequested = false;
                         hitTestSource = null;
 
-                        // Clean up AR objects from the scene
+                        // Clean up AR objects from the scene to prevent duplicates
                         arPinsInScene.forEach(pin => scene.remove(pin));
                         arPinsInScene = [];
 
@@ -322,6 +341,7 @@
                     if (hitTestResults.length) {
                         const hit = hitTestResults[0];
                         reticle.visible = true;
+                        // Position the reticle at the detected hit point
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
                     } else {
                         reticle.visible = false;
@@ -329,13 +349,21 @@
                 }
             }
 
+            // Animate pins in the scene
             if (arReady) {
                 arPinsInScene.forEach(pin => {
-                    pin.rotation.y += 0.01;
+                    pin.rotation.y += 0.01; // Gently rotate the pins
                 });
                 renderer.render(scene, camera);
             }
         }
     </script>
+
+    <!-- 
+      The Google Maps script is placed AFTER the module script. 
+      The 'defer' attribute ensures it runs after the page is parsed and our script is ready.
+    -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDKFpUFxl8pfNSbx0GlQhmvFaHePoBxhKs&callback=initApp&libraries=geometry" defer></script>
+
 </body>
 </html>
