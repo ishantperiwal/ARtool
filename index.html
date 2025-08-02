@@ -61,6 +61,10 @@
         <button id="enter-ar-button" class="absolute bottom-10 left-1/2 -translate-x-1/2 z-10 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-full shadow-lg transition-transform transform hover:scale-105">
             Go Inside AR
         </button>
+        <!-- UPDATED: Button to delete all saved pins -->
+        <button id="delete-all-pins-button" class="absolute top-4 right-4 z-10 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+            Delete All Pins
+        </button>
     </div>
 
     <!-- UI Panel for status messages and coordinates -->
@@ -105,6 +109,8 @@
             initMap();
             watchGPS();
             setupEnterARButton();
+            // UPDATED: Setup the new delete button
+            setupDeleteButton(); 
         };
 
         // --- MAP FUNCTIONS ---
@@ -138,6 +144,17 @@
                 
                 // Programmatically click the hidden Three.js AR button to start the WebXR session
                 document.getElementById('ar-button').click();
+            });
+        }
+        
+        // UPDATED: New function to set up the delete all pins button
+        function setupDeleteButton() {
+            const deleteButton = document.getElementById('delete-all-pins-button');
+            deleteButton.addEventListener('click', () => {
+                // A simple confirmation before deleting
+                if (confirm("Are you sure you want to delete all saved pins? This cannot be undone.")) {
+                    deleteAllPins();
+                }
             });
         }
 
@@ -185,7 +202,6 @@
         // --- LOCAL STORAGE & PIN MANAGEMENT ---
         function savePinsToLocalStorage() {
             localStorage.setItem('ar_gps_pins', JSON.stringify(allPinData));
-            // UPDATED: Clarified status message
             updateStatus(`${allPinData.length} pins saved to local storage.`);
         }
 
@@ -193,16 +209,25 @@
             const savedPinsJSON = localStorage.getItem('ar_gps_pins');
             if (savedPinsJSON) {
                 allPinData = JSON.parse(savedPinsJSON);
-                // UPDATED: Clarified status message
                 updateStatus(`Loaded ${allPinData.length} pins from local storage.`);
                 // Add markers on the map for each loaded pin
                 allPinData.forEach(pinData => {
                     placeMarkerOnMap(pinData);
                 });
             } else {
-                // UPDATED: Clarified status message
                 updateStatus("No pins found in local storage. Place a new one in AR!");
             }
+        }
+        
+        // UPDATED: New function to delete all pins
+        function deleteAllPins() {
+            // Clear the data from the array
+            allPinData = [];
+            // Remove the data from local storage
+            localStorage.removeItem('ar_gps_pins');
+            updateStatus("All pins have been deleted.");
+            // Reload the page to clear the map and reset the view
+            location.reload();
         }
 
         // --- CORE AR + GPS LOGIC ---
@@ -258,7 +283,6 @@
             // Places a standard Google Maps marker
             if (!googleMap) return;
 
-            // UPDATED: Define a custom star-shaped icon for the map pins
             const starIcon = {
                 path: 'M 12,2.5 L 14.3,7.7 L 20,8.5 L 16,12.3 L 17,18 L 12,15.2 L 7,18 L 8,12.3 L 4,8.5 L 9.7,7.7 Z',
                 fillColor: '#FFD700', // Gold color for the star
@@ -272,7 +296,6 @@
             const marker = new google.maps.Marker({
                 position: { lat: data.lat, lng: data.lon },
                 map: googleMap,
-                // Use the new star icon
                 icon: starIcon,
                 title: `Pin placed at ${new Date(data.createdAt).toLocaleString()}`,
                 animation: google.maps.Animation.DROP,
