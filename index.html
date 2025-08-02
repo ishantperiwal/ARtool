@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>WebXR AR GPS Pins</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <!-- We'll use Tailwind CSS for easier styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Maps API - IMPORTANT: Replace YOUR_API_KEY with your actual key -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap&libraries=geometry" async defer></script>
+    <style>
+        /* Basic styling for the layout */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrolling */
+        }
+        #ar-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        #map-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 35%; /* Map takes up bottom part of the screen */
+            z-index: 2;
+            border-top: 4px solid #4A90E2;
+            transition: height 0.3s ease-in-out;
+        }
+        #map-container.expanded {
+            height: 80%;
+        }
+        #map-toggle {
+            position: absolute;
+            top: -32px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 3;
+        }
+        #info-panel {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            z-index: 3;
+            max-width: 300px;
+        }
+        /* Hide the default AR button since we have a custom UI */
+        #ar-button { display: none !important; }
+    </style>
+</head>
+<body class="bg-black text-white">
+
+    <!-- AR View Container -->
+    <div id="ar-container"></div>
+
+    <!-- UI Panels -->
+    <div id="info-panel">
+        <p id="status">Welcome! Enter AR to begin.</p>
+        <p id="coords">Lat/Lon: N/A</p>
+    </div>
+
+    <!-- Map View Container -->
+    <div id="map-container">
+        <button id="map-toggle" class="bg-blue-600 text-white px-4 py-1 rounded-t-lg">▲ Map</button>
+        <div id="map" class="w-full h-full"></div>
+    </div>
+
+    <!-- Custom AR Start Button -->
+    <button id="custom-ar-button" class="absolute bottom-[37%] left-1/2 -translate-x-1/2 z-10 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg">
+        Enter AR
+    </button>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.148.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        // Firebase Imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Three.js Imports
+        import * as THREE from 'three';
+        import { ARButton } from 'three/addons/webxr/ARButton.js';
+
+        // --- GLOBAL VARIABLES ---
+        let camera, scene, renderer;
+        let controller;
+        let reticle;
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+
+        let googleMap; // To hold the Google Map instance
+        let placedPins = []; // To keep track of pins in the current session
+
+        // --- FIREBASE SETUP ---
+        // These variables are expected to be provided by the environment.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ar-gps-pins-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "YOUR_FALLBACK_API_KEY", authDomain: "...", projectId: "..." };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        let userId = null; // Will be set on auth state change
+
+        // --- AUTHENTICATION ---
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                userId = user.uid;
+                console.log("User authenticated with UID:", userId);
+                updateStatus("Authenticated. Ready to place pins.");
+                loadPinsFromFirestore(); // Load existing pins once authenticated
+            } else {
+                signInAnonymously(auth).catch((error) => {
+                    console.error("Anonymous sign-in failed:", error);
+                    updateStatus("Error: Could not connect to the database.");
+                });
+            }
+        });
+
+        // --- INITIALIZATION ---
+        function initAR() {
+            const arContainer = document.getElementById('ar-container');
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 40);
+
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
+            light.position.set(0.5, 1, 0.25);
+            scene.add(light);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            arContainer.appendChild(renderer.domElement);
+
+            // Setup AR Button
+            const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
+            document.body.appendChild(arButton); // Keep it in DOM for functionality
+            
+            // Trigger the hidden AR button with our custom one
+            document.getElementById('custom-ar-button').addEventListener('click', () => {
+                arButton.click();
+                document.getElementById('custom-ar-button').style.display = 'none';
+                updateStatus("Move your phone to find a surface.");
+            });
+
+            reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0x4A90E2 })
+            );
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+
+            controller = renderer.xr.getController(0);
+            controller.addEventListener('select', onSelect);
+            scene.add(controller);
+
+            window.addEventListener('resize', onWindowResize);
+            
+            // Start watching GPS location
+            watchGPS();
+
+            renderer.setAnimationLoop(render);
+        }
+
+        // --- GOOGLE MAPS INTEGRATION ---
+        window.initMap = () => {
+            const initialLocation = { lat: 34.0522, lng: -118.2437 }; // Default to Los Angeles
+            googleMap = new google.maps.Map(document.getElementById("map"), {
+                center: initialLocation,
+                zoom: 18,
+                mapTypeId: 'satellite',
+                disableDefaultUI: true,
+                gestureHandling: 'greedy'
+            });
+            updateStatus("Map initialized.");
+        };
+
+        function watchGPS() {
+            if (!navigator.geolocation) {
+                updateStatus("Geolocation is not supported by your browser.");
+                return;
+            }
+            navigator.geolocation.watchPosition(
+                (position) => {
+                    const { latitude, longitude } = position.coords;
+                    document.getElementById('coords').textContent = `Lat/Lon: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+                    if (googleMap) {
+                        const newPos = { lat: latitude, lng: longitude };
+                        googleMap.setCenter(newPos);
+                    }
+                },
+                () => { updateStatus("Unable to retrieve your location."); },
+                { enableHighAccuracy: true }
+            );
+        }
+
+        // --- CORE AR + GPS LOGIC ---
+        function onSelect() {
+            if (reticle.visible) {
+                updateStatus("Getting precise location...");
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const { latitude, longitude, altitude } = position.coords;
+                    const pinData = {
+                        lat: latitude,
+                        lon: longitude,
+                        alt: altitude || 0,
+                        userId: userId,
+                        createdAt: serverTimestamp()
+                    };
+                    
+                    // 1. Save the pin to Firestore
+                    savePinToFirestore(pinData);
+
+                    // 2. Place a visual representation in the AR scene
+                    const pinPosition = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+                    placePinInScene(pinPosition, pinData, true);
+                    
+                    // 3. Place a marker on the Google Map
+                    placeMarkerOnMap(pinData);
+
+                }, (error) => {
+                    console.error("GPS Error:", error);
+                    updateStatus(`Error getting location: ${error.message}`);
+                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+            }
+        }
+
+        async function savePinToFirestore(pinData) {
+            if (!userId) {
+                updateStatus("Error: Not authenticated. Cannot save pin.");
+                return;
+            }
+            try {
+                const docRef = await addDoc(collection(db, "ar_pins"), pinData);
+                updateStatus(`Pin saved successfully! ID: ${docRef.id}`);
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                updateStatus("Error: Could not save pin to database.");
+            }
+        }
+        
+        async function loadPinsFromFirestore() {
+            if (!userId || !googleMap) {
+                console.log("Waiting for auth and map to load pins...");
+                return;
+            }
+            updateStatus("Loading existing pins...");
+            const q = query(collection(db, "ar_pins"), where("userId", "==", userId));
+            const querySnapshot = await getDocs(q);
+            
+            let pinsFound = 0;
+            querySnapshot.forEach((doc) => {
+                const pinData = doc.data();
+                // For now, we just place them on the map.
+                // Placing them in the AR scene on load requires a more complex
+                // world-anchoring strategy.
+                placeMarkerOnMap(pinData);
+                pinsFound++;
+            });
+            updateStatus(`Loaded ${pinsFound} pins from the database.`);
+        }
+
+        function placePinInScene(position, data, isNew) {
+            const geometry = new THREE.CylinderGeometry(0.01, 0.08, 0.4, 32);
+            const material = new THREE.MeshStandardMaterial({
+                color: isNew ? 0xff3366 : 0xffff00, // Red for new, yellow for loaded
+                metalness: 0.4,
+                roughness: 0.6
+            });
+            const pin = new THREE.Mesh(geometry, material);
+            
+            // Position the pin so its tip is at the target position
+            pin.position.copy(position);
+            pin.position.y += 0.2; // Half the height of the cylinder
+            
+            pin.userData = data; // Store GPS data on the object
+            scene.add(pin);
+            placedPins.push(pin);
+        }
+
+        function placeMarkerOnMap(data) {
+            if (!googleMap) return;
+            const marker = new google.maps.Marker({
+                position: { lat: data.lat, lng: data.lon },
+                map: googleMap,
+                title: `Pin placed at ${new Date(data.createdAt?.toDate()).toLocaleString()}`,
+                animation: google.maps.Animation.DROP,
+            });
+        }
+
+        // --- UTILITY & EVENT HANDLERS ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateStatus(message) {
+            console.log(message);
+            document.getElementById('status').textContent = message;
+        }
+        
+        document.getElementById('map-toggle').addEventListener('click', () => {
+            document.getElementById('map-container').classList.toggle('expanded');
+            const button = document.getElementById('map-toggle');
+            button.textContent = button.textContent.includes('▲') ? '▼ Map' : '▲ Map';
+        });
+
+        // --- RENDER LOOP ---
+        function render(timestamp, frame) {
+            if (frame) {
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+
+                if (!hitTestSourceRequested) {
+                    session.requestReferenceSpace('viewer').then((refSpace) => {
+                        session.requestHitTestSource({ space: refSpace }).then((source) => {
+                            hitTestSource = source;
+                        });
+                    });
+                    session.addEventListener('end', () => {
+                        hitTestSourceRequested = false;
+                        hitTestSource = null;
+                        document.getElementById('custom-ar-button').style.display = 'block';
+                        updateStatus("AR session ended. Enter AR to begin again.");
+                    });
+                    hitTestSourceRequested = true;
+                }
+
+                if (hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    if (hitTestResults.length) {
+                        const hit = hitTestResults[0];
+                        reticle.visible = true;
+                        reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+                    } else {
+                        reticle.visible = false;
+                    }
+                }
+            }
+
+            // Animate placed pins
+            placedPins.forEach(pin => {
+                pin.rotation.y += 0.01;
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        // --- START THE APP ---
+        initAR();
+
+    </script>
+</body>
+</html>
