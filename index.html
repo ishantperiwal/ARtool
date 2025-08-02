@@ -45,7 +45,7 @@
         }
         #ar-button { display: none !important; }
 
-        /* UPDATED: Styling for the loading indicator */
+        /* Styling for the loading indicator */
         #loading-indicator {
             position: absolute;
             top: 50%;
@@ -65,7 +65,6 @@
 
     <!-- The AR view will be populated by Three.js -->
     <div id="ar-container">
-        <!-- UPDATED: Added a loading indicator for placing pins -->
         <div id="loading-indicator">Loading Pins...</div>
     </div>
 
@@ -84,6 +83,8 @@
     <div id="info-panel">
         <p id="status">Welcome! Loading map...</p>
         <p id="coords">Lat/Lon: N/A</p>
+        <!-- UPDATED: Added element to show reticle coordinates -->
+        <p id="reticle-coords">Reticle (X, Z): N/A</p>
     </div>
     
     <script type="importmap">
@@ -112,7 +113,6 @@
         let arPinsInScene = [];
         let arReady = false;
 
-        // UPDATED: Variable to store the device's compass heading for accuracy
         let deviceHeading = 0;
 
         // --- APPLICATION INITIALIZATION ---
@@ -121,7 +121,6 @@
             watchGPS();
             setupEnterARButton();
             setupDeleteButton(); 
-            // UPDATED: Set up device orientation to get compass data
             setupDeviceOrientation();
         };
 
@@ -167,12 +166,8 @@
         }
 
         // --- AR & SENSOR INITIALIZATION ---
-        
-        // UPDATED: New function to get compass heading for pin placement accuracy
         function setupDeviceOrientation() {
-            // Feature detection for DeviceOrientationEvent
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                // iOS 13+ requires user permission for device orientation events
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
                         if (permissionState === 'granted') {
@@ -183,14 +178,11 @@
                     })
                     .catch(console.error);
             } else {
-                // For other browsers (e.g., Android)
                 window.addEventListener('deviceorientation', handleOrientation);
             }
         }
 
         function handleOrientation(event) {
-            // 'webkitCompassHeading' is for iOS and is the most reliable.
-            // 'alpha' is the fallback for other devices, representing rotation around z-axis.
             const heading = event.webkitCompassHeading || event.alpha;
             if (heading !== null) {
                 deviceHeading = heading;
@@ -258,7 +250,7 @@
         // --- CORE AR + GPS LOGIC ---
         function placeExistingPinsInAR() {
             const loadingIndicator = document.getElementById('loading-indicator');
-            loadingIndicator.style.display = 'block'; // Show loading indicator
+            loadingIndicator.style.display = 'block';
             updateStatus("Locating you to place saved pins...");
 
             navigator.geolocation.getCurrentPosition(position => {
@@ -272,8 +264,6 @@
                     const distance = google.maps.geometry.spherical.computeDistanceBetween(userLocation, pinLocation);
                     const pinHeading = google.maps.geometry.spherical.computeHeading(userLocation, pinLocation);
                     
-                    // UPDATED: Improve accuracy by accounting for the device's current compass heading.
-                    // This calculates the pin's direction relative to where the user is currently looking.
                     const relativeHeading = pinHeading - deviceHeading;
                     
                     const x = distance * Math.sin(relativeHeading * Math.PI / 180);
@@ -283,12 +273,12 @@
                     placePinInScene(pinPosition, pinData, false);
                 });
                 
-                loadingIndicator.style.display = 'none'; // Hide loading indicator
+                loadingIndicator.style.display = 'none';
 
             }, (error) => {
                 console.error("GPS Error:", error);
                 updateStatus(`Could not get your location to place saved pins: ${error.message}`);
-                loadingIndicator.style.display = 'none'; // Hide loading indicator on error
+                loadingIndicator.style.display = 'none';
             }, { enableHighAccuracy: true });
         }
 
@@ -429,12 +419,22 @@
 
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    // UPDATED: Get the UI element for reticle coordinates
+                    const reticleCoordsEl = document.getElementById('reticle-coords');
+
                     if (hitTestResults.length) {
                         const hit = hitTestResults[0];
                         reticle.visible = true;
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+
+                        // UPDATED: Get the reticle's position and display its X and Z coordinates
+                        const reticlePosition = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+                        reticleCoordsEl.textContent = `Reticle (X, Z): ${reticlePosition.x.toFixed(2)}, ${reticlePosition.z.toFixed(2)}`;
+
                     } else {
                         reticle.visible = false;
+                        // UPDATED: Update text when reticle is not visible
+                        reticleCoordsEl.textContent = 'Reticle (X, Z): N/A';
                     }
                 }
             }
