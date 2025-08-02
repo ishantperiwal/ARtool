@@ -6,8 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Maps API - IMPORTANT: Replace YOUR_API_KEY with your actual key -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initApp&libraries=geometry" async defer></script>
+    <!-- 
+      FIX: Removed 'async' and kept 'defer'. 
+      This ensures this script runs after the page is parsed and in order, 
+      preventing the race condition with our module script below.
+    -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initApp&libraries=geometry" defer></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -95,7 +99,7 @@
         let arReady = false; // Flag to check if AR has been initialized
 
         // --- APPLICATION INITIALIZATION ---
-        // This function is the main entry point, called by the Google Maps script
+        // We attach our main function to the window object so the Google Maps callback can find it.
         window.initApp = () => {
             initMap();
             watchGPS();
@@ -277,7 +281,9 @@
 
         // --- RENDER LOOP ---
         function render(timestamp, frame) {
-            if (frame) {
+            if (!renderer) return; // Don't render if AR not initialized
+
+            if (renderer.xr.isPresenting && frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
@@ -323,11 +329,12 @@
                 }
             }
 
-            arPinsInScene.forEach(pin => {
-                pin.rotation.y += 0.01;
-            });
-
-            renderer.render(scene, camera);
+            if (arReady) {
+                arPinsInScene.forEach(pin => {
+                    pin.rotation.y += 0.01;
+                });
+                renderer.render(scene, camera);
+            }
         }
     </script>
 </body>
