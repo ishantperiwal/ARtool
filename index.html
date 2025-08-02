@@ -66,6 +66,12 @@
     <!-- The AR view will be populated by Three.js -->
     <div id="ar-container">
         <div id="loading-indicator">Loading Pins...</div>
+        <!-- UPDATED: Moved info-panel inside the AR container to ensure it's visible during the AR session -->
+        <div id="info-panel">
+            <p id="status">Welcome! Loading map...</p>
+            <p id="coords">Lat/Lon: N/A</p>
+            <p id="reticle-coords">Reticle (X, Z): N/A</p>
+        </div>
     </div>
 
     <!-- The Map view is the default view -->
@@ -77,14 +83,6 @@
         <button id="delete-all-pins-button" class="absolute top-4 right-4 z-10 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
             Delete All Pins
         </button>
-    </div>
-
-    <!-- UI Panel for status messages and coordinates -->
-    <div id="info-panel">
-        <p id="status">Welcome! Loading map...</p>
-        <p id="coords">Lat/Lon: N/A</p>
-        <!-- UPDATED: Added element to show reticle coordinates -->
-        <p id="reticle-coords">Reticle (X, Z): N/A</p>
     </div>
     
     <script type="importmap">
@@ -361,7 +359,8 @@
                     const { latitude, longitude } = position.coords;
                     document.getElementById('coords').textContent = `Lat/Lon: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
                     if (googleMap && !renderer?.xr.isPresenting) {
-                        googleMap.setCenter({ lat: latitude, lng: longitude });
+                        // When not in AR, update the status panel on the map screen
+                        document.querySelector('#map-container + #info-panel #status').textContent = 'Watching your location...';
                     }
                 },
                 () => { updateStatus("Unable to retrieve your location."); },
@@ -380,7 +379,8 @@
 
         function updateStatus(message) {
             console.log(message);
-            document.getElementById('status').textContent = message;
+            // Update the status in the info panel, which is now inside the AR container
+            document.querySelector('#info-panel #status').textContent = message;
         }
 
         // --- RENDER LOOP ---
@@ -412,14 +412,15 @@
                             googleMap.setCenter({ lat: lastPin.lat, lng: lastPin.lon });
                             googleMap.setZoom(20);
                         }
-                        updateStatus("Exited AR. View your pins on the map.");
+                        // When exiting AR, update the status on the map screen's panel if we were to have one
+                        // For now, we just log it.
+                        console.log("Exited AR. View your pins on the map.");
                     });
                     hitTestSourceRequested = true;
                 }
 
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    // UPDATED: Get the UI element for reticle coordinates
                     const reticleCoordsEl = document.getElementById('reticle-coords');
 
                     if (hitTestResults.length) {
@@ -427,13 +428,11 @@
                         reticle.visible = true;
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
 
-                        // UPDATED: Get the reticle's position and display its X and Z coordinates
                         const reticlePosition = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
                         reticleCoordsEl.textContent = `Reticle (X, Z): ${reticlePosition.x.toFixed(2)}, ${reticlePosition.z.toFixed(2)}`;
 
                     } else {
                         reticle.visible = false;
-                        // UPDATED: Update text when reticle is not visible
                         reticleCoordsEl.textContent = 'Reticle (X, Z): N/A';
                     }
                 }
