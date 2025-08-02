@@ -114,7 +114,6 @@
             googleMap = new google.maps.Map(document.getElementById("map"), {
                 center: initialLocation,
                 zoom: 18,
-                // UPDATED: Changed map type from 'satellite' to 'roadmap' for the simple view
                 mapTypeId: 'roadmap', 
                 disableDefaultUI: true,
                 gestureHandling: 'greedy'
@@ -186,20 +185,23 @@
         // --- LOCAL STORAGE & PIN MANAGEMENT ---
         function savePinsToLocalStorage() {
             localStorage.setItem('ar_gps_pins', JSON.stringify(allPinData));
-            updateStatus(`${allPinData.length} pins saved to browser cache.`);
+            // UPDATED: Clarified status message
+            updateStatus(`${allPinData.length} pins saved to local storage.`);
         }
 
         function loadPinsFromLocalStorage() {
             const savedPinsJSON = localStorage.getItem('ar_gps_pins');
             if (savedPinsJSON) {
                 allPinData = JSON.parse(savedPinsJSON);
-                updateStatus(`Loaded ${allPinData.length} pins from cache.`);
+                // UPDATED: Clarified status message
+                updateStatus(`Loaded ${allPinData.length} pins from local storage.`);
                 // Add markers on the map for each loaded pin
                 allPinData.forEach(pinData => {
                     placeMarkerOnMap(pinData);
                 });
             } else {
-                updateStatus("No pins found in cache. Place a new one in AR!");
+                // UPDATED: Clarified status message
+                updateStatus("No pins found in local storage. Place a new one in AR!");
             }
         }
 
@@ -255,9 +257,23 @@
         function placeMarkerOnMap(data) {
             // Places a standard Google Maps marker
             if (!googleMap) return;
+
+            // UPDATED: Define a custom star-shaped icon for the map pins
+            const starIcon = {
+                path: 'M 12,2.5 L 14.3,7.7 L 20,8.5 L 16,12.3 L 17,18 L 12,15.2 L 7,18 L 8,12.3 L 4,8.5 L 9.7,7.7 Z',
+                fillColor: '#FFD700', // Gold color for the star
+                fillOpacity: 1,
+                strokeWeight: 0,
+                rotation: 0,
+                scale: 1.5,
+                anchor: new google.maps.Point(12, 12)
+            };
+
             const marker = new google.maps.Marker({
                 position: { lat: data.lat, lng: data.lon },
                 map: googleMap,
+                // Use the new star icon
+                icon: starIcon,
                 title: `Pin placed at ${new Date(data.createdAt).toLocaleString()}`,
                 animation: google.maps.Animation.DROP,
             });
