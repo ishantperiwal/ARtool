@@ -90,9 +90,11 @@
         let orientationControls;
         let arButton, orientationButton;
         let infoDiv;
+        let initialObject; // To hold our startup object
 
         let hitTestSource = null;
         let hitTestSourceRequested = false;
+        let initialObjectPlaced = false; // Flag to check if the initial object is placed in AR
 
         const placedObjects = [];
 
@@ -145,20 +147,19 @@
         }
 
         function createInitialObject() {
-            // Use a more distinct shape for the initial object
             const geometry = new THREE.IcosahedronGeometry(0.2, 0); 
             const material = new THREE.MeshStandardMaterial({
                 color: 0xffd700, // Gold color
                 roughness: 0.3,
                 metalness: 0.8
             });
-            const initialObject = new THREE.Mesh(geometry, material);
+            initialObject = new THREE.Mesh(geometry, material);
             
-            // Position it 3 meters in front of the camera's starting point
+            // Position it for the non-AR view first
             initialObject.position.set(0, 0, -3); 
             
             scene.add(initialObject);
-            placedObjects.push(initialObject); // Add to the array to make it spin
+            placedObjects.push(initialObject);
         }
 
         function setupButtons() {
@@ -173,7 +174,6 @@
             orientationButton.textContent = 'Enable Motion Control';
             
             orientationButton.onclick = () => {
-                // Feature detection for iOS 13+
                 if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                     orientationButton.textContent = 'Requesting...';
                     DeviceOrientationEvent.requestPermission().then(permissionState => {
@@ -188,7 +188,6 @@
                         }
                     }).catch(console.error);
                 } else {
-                    // For non-iOS devices
                     infoDiv.textContent = 'Motion controls enabled. Tilt your device to look around.';
                     orientationControls.enabled = true;
                     orientationButton.style.display = 'none';
@@ -225,18 +224,16 @@
         function render(timestamp, frame) {
             const session = renderer.xr.getSession();
 
-            // Handle visibility and state of controls
-            if (session) { // In AR session
+            if (session) { 
                 if (orientationControls.enabled) {
                     orientationControls.enabled = false;
                 }
                 orientationButton.style.display = 'none';
-                infoDiv.textContent = 'Point your camera at a surface, then tap to place a cube.';
-            } else { // Not in AR session
+                infoDiv.textContent = 'Point your camera at a surface...';
+            } else { 
                 if (orientationControls.enabled) {
                     orientationControls.update();
                 } else {
-                    // Only show the button if it's not disabled
                     if (!orientationButton.disabled) {
                         orientationButton.style.display = 'block';
                     }
@@ -256,6 +253,8 @@
                     session.addEventListener('end', () => {
                         hitTestSourceRequested = false;
                         hitTestSource = null;
+                        initialObjectPlaced = false; // Reset for next session
+                        initialObject.position.set(0, 0, -3); // Reset for non-AR view
                         infoDiv.textContent = 'Welcome back! Enable motion controls or re-enter AR.';
                     });
 
@@ -266,6 +265,14 @@
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
                     if (hitTestResults.length) {
                         const hit = hitTestResults[0];
+                        
+                        // Place the initial object on the first detected surface
+                        if (!initialObjectPlaced) {
+                            initialObject.position.setFromMatrixPosition(hit.getPose(referenceSpace).transform.matrix);
+                            initialObjectPlaced = true;
+                            infoDiv.textContent = 'Initial object placed! You can now place more cubes.';
+                        }
+
                         reticle.visible = true;
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
                     } else {
