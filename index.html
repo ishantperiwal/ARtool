@@ -9,6 +9,8 @@
     <style>
         body {
             font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars during AR */
         }
         /* Prevents flashing of the button before WebXR availability is checked */
         #ar-button {
@@ -18,27 +20,18 @@
         #main-container.ar-mode {
             background-color: transparent;
         }
-        /* Simple spinner for loading state */
-        .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        /* Ensure canvas doesn't interfere with UI layout before AR starts */
+        canvas {
+            display: block;
         }
     </style>
 </head>
 <body class="bg-gray-900 text-white">
 
-    <!-- Main Container -->
-    <div id="main-container" class="min-h-screen flex flex-col items-center justify-center p-4">
+    <!-- Main Container for UI -->
+    <div id="main-container" class="min-h-screen w-full h-full flex flex-col items-center justify-center p-4">
         
-        <!-- UI Container -->
+        <!-- UI Content -->
         <div id="ui-container" class="w-full max-w-md text-center">
             <h1 class="text-4xl font-bold mb-4">XR Hide & Seek</h1>
             <p id="instructions" class="text-lg text-gray-300 mb-8">
@@ -68,6 +61,8 @@
     <script type="module">
         // --- Basic Three.js Scene Setup ---
         const scene = new THREE.Scene();
+        // Explicitly set scene background to null for AR transparency.
+        scene.background = null;
         const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -119,30 +114,33 @@
         // --- Initialize the AR Session ---
         async function onARSessionStart() {
             try {
-                // Append the renderer's canvas to the body
-                document.body.appendChild(renderer.domElement);
-
                 xrSession = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test', 'dom-overlay'],
                     domOverlay: { root: mainContainer }
                 });
 
-                // Add class to make the DOM overlay transparent
+                // Set up the renderer and DOM for the AR session
+                document.body.appendChild(renderer.domElement);
                 mainContainer.classList.add('ar-mode');
                 
+                // Enforce correct stacking order
+                renderer.domElement.style.position = 'absolute';
+                renderer.domElement.style.top = '0';
+                renderer.domElement.style.left = '0';
+                renderer.domElement.style.zIndex = '1';
+                mainContainer.style.position = 'relative';
+                mainContainer.style.zIndex = '2';
+
                 xrRefSpace = await xrSession.requestReferenceSpace('local');
                 const viewerSpace = await xrSession.requestReferenceSpace('viewer');
                 xrHitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
 
-                // Add event listeners for session events
                 xrSession.addEventListener('select', onSelect);
                 xrSession.addEventListener('end', onARSessionEnd);
 
-                // Hide UI elements that are not needed in AR
                 arButton.style.display = 'none';
                 statusMessage.style.display = 'none';
                 
-                // Set initial game state
                 setGameState('HIDING');
 
                 renderer.setAnimationLoop(onXRFrame);
@@ -156,24 +154,28 @@
         
         // --- Handle AR Session End ---
         function onARSessionEnd() {
-            // Remove the transparent background class
             mainContainer.classList.remove('ar-mode');
+            
+            // Reset styles
+            mainContainer.style.position = '';
+            mainContainer.style.zIndex = '';
 
-            // Show the initial UI again
             arButton.style.display = 'block';
             instructions.innerHTML = "Find a friend and a well-lit room to play!";
             statusMessage.style.display = 'block';
+            stabilizationMessage.style.display = 'none';
 
-            // Clean up objects
             if (hiddenObject) hiddenObject.visible = false;
             if (reticle) reticle.visible = false;
             
-            // Remove any dynamically added buttons
             const restartButton = instructions.querySelector('button');
             if (restartButton) restartButton.remove();
 
-            // Stop the render loop
             renderer.setAnimationLoop(null);
+            // Remove the canvas from the DOM
+            if (renderer.domElement.parentElement) {
+                renderer.domElement.parentElement.removeChild(renderer.domElement);
+            }
             xrSession = null;
         }
 
@@ -183,13 +185,11 @@
 
             const viewerPose = frame.getViewerPose(xrRefSpace);
             if (viewerPose) {
-                // Update camera position and orientation
                 const view = viewerPose.views[0];
                 camera.matrix.fromArray(view.transform.matrix);
                 camera.projectionMatrix.fromArray(view.projectionMatrix);
                 camera.updateMatrixWorld(true);
 
-                // Handle hit testing for object placement
                 if (xrHitTestSource && gameState === 'HIDING') {
                     const hitTestResults = frame.getHitTestResults(xrHitTestSource);
                     if (hitTestResults.length > 0) {
@@ -226,7 +226,6 @@
                     if (reticle) reticle.visible = false;
                     if(hiddenObject) hiddenObject.visible = true;
                     
-                    // Add a button to restart
                     const newRestartButton = document.createElement('button');
                     newRestartButton.innerText = 'Found It! (Play Again)';
                     newRestartButton.className = 'bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg text-xl mt-4 transition-transform duration-200 transform hover:scale-105';
@@ -267,7 +266,6 @@
             if (gameState === 'HIDING' && reticle.visible) {
                 if (!hiddenObject) createHiddenObject();
                 
-                // Position the hidden object at the reticle's location
                 hiddenObject.position.setFromMatrixPosition(reticle.matrix);
                 hiddenObject.quaternion.setFromRotationMatrix(reticle.matrix);
                 
@@ -277,9 +275,7 @@
 
         // --- Event Listeners ---
         arButton.addEventListener('click', onARSessionStart);
-        
         document.addEventListener('DOMContentLoaded', checkXRSupport);
-        
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
