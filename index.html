@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Digital Compass</title>
+    <title>True North Compass</title>
     <style>
         /* General styling for the body to center content */
         body {
@@ -17,6 +17,8 @@
             flex-direction: column;
             color: #ecf0f1;
             text-align: center;
+            padding: 10px;
+            box-sizing: border-box;
         }
 
         /* Container for the compass */
@@ -41,6 +43,7 @@
             top: 0;
             left: 0;
             border-radius: 50%;
+            border: 2px solid #7f8c8d;
         }
 
         /* Styling for the N, E, S, W markers */
@@ -119,11 +122,12 @@
 
         /* Message for errors or status */
         #message-display {
-            display: none;
-            color: #e74c3c;
-            margin-top: 20px;
+            color: #bdc3c7;
+            margin-top: 15px;
             padding: 10px;
-            max-width: 80%;
+            max-width: 90%;
+            min-height: 40px;
+            font-style: italic;
         }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
@@ -142,98 +146,146 @@
     </div>
 
     <div id="heading-display">--°</div>
+    <div id="message-display">(Points to True North)</div>
     
     <button id="start-btn">Start Compass</button>
 
-    <div id="message-display"></div>
-
     <script>
-        // Get references to the DOM elements
         const arrow = document.getElementById('compass-arrow');
         const headingDisplay = document.getElementById('heading-display');
         const startBtn = document.getElementById('start-btn');
         const messageDisplay = document.getElementById('message-display');
 
+        let magneticDeclination = 0; // This will hold the correction value
+
         /**
-         * Function to start listening for orientation events.
+         * Main starting function, triggered by the button.
+         * It orchestrates the permission requests and API calls.
          */
-        function startCompass() {
-            window.addEventListener('deviceorientation', handleOrientation, true);
-            startBtn.style.display = 'none';
-            messageDisplay.style.display = 'none';
+        function start() {
+            startBtn.style.display = 'none'; // Hide button once clicked
+            
+            // 1. Get Location for True North correction
+            getLocation();
         }
 
         /**
-         * Handles the request for sensor permissions, required on iOS 13+ and other modern browsers.
+         * Asks for geolocation permission and fetches coordinates.
          */
-        function requestPermissionAndStart() {
+        function getLocation() {
+            messageDisplay.textContent = 'Requesting location for True North correction...';
+            if ('geolocation' in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    position => {
+                        const { latitude, longitude } = position.coords;
+                        fetchMagneticDeclination(latitude, longitude);
+                    },
+                    error => {
+                        messageDisplay.textContent = 'Location denied. Compass will point to Magnetic North.';
+                        console.warn('Geolocation permission denied:', error.message);
+                        // If location fails, proceed without correction
+                        requestOrientationPermission();
+                    }
+                );
+            } else {
+                messageDisplay.textContent = 'Geolocation not available. Compass will point to Magnetic North.';
+                // If geolocation is not supported, proceed without correction
+                requestOrientationPermission();
+            }
+        }
+
+        /**
+         * Fetches magnetic declination from NOAA's API via a CORS proxy.
+         * @param {number} lat - The user's latitude.
+         * @param {number} lon - The user's longitude.
+         */
+        async function fetchMagneticDeclination(lat, lon) {
+            messageDisplay.textContent = 'Fetching magnetic correction...';
+            // We use a CORS proxy to access the NOAA API from the browser.
+            const apiUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://www.ngdc.noaa.gov/geomag-web/calculators/calculateDeclination?lat1=${lat}&lon1=${lon}&resultFormat=json`)}`;
+            
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error('Network response was not ok.');
+                
+                const data = await response.json();
+                const result = JSON.parse(data.contents); // The actual JSON is inside the 'contents' property
+                
+                if (result && result.result && result.result[0] && result.result[0].declination) {
+                    magneticDeclination = parseFloat(result.result[0].declination);
+                    messageDisplay.textContent = `Correction applied: ${magneticDeclination.toFixed(2)}°`;
+                } else {
+                    throw new Error('Invalid API response format.');
+                }
+            } catch (error) {
+                messageDisplay.textContent = 'Could not fetch correction. Using Magnetic North.';
+                console.error('Failed to fetch magnetic declination:', error);
+            } finally {
+                // Whether fetching succeeded or failed, we now ask for orientation permission.
+                requestOrientationPermission();
+            }
+        }
+
+        /**
+         * Requests permission for device orientation sensors.
+         */
+        function requestOrientationPermission() {
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
                         if (permissionState === 'granted') {
-                            startCompass();
+                            window.addEventListener('deviceorientation', handleOrientation, true);
                         } else {
-                            messageDisplay.textContent = 'Permission to access orientation sensors was denied.';
-                            messageDisplay.style.display = 'block';
+                            messageDisplay.textContent = 'Orientation sensor permission was denied.';
                         }
                     })
                     .catch(error => {
-                        messageDisplay.textContent = 'Error requesting sensor permission: ' + error.message;
-                        messageDisplay.style.display = 'block';
+                        messageDisplay.textContent = 'Error requesting sensor permission.';
                         console.error(error);
                     });
+            } else if ('DeviceOrientationEvent' in window) {
+                window.addEventListener('deviceorientation', handleOrientation, true);
             } else {
-                if ('DeviceOrientationEvent' in window) {
-                    startCompass();
-                } else {
-                    messageDisplay.textContent = 'Your device or browser does not support the required orientation sensors.';
-                    messageDisplay.style.display = 'block';
-                    startBtn.style.display = 'none';
-                }
+                messageDisplay.textContent = 'Your device does not support orientation sensors.';
             }
         }
         
-        startBtn.addEventListener('click', requestPermissionAndStart);
+        startBtn.addEventListener('click', start);
 
         /**
-         * Handles the device orientation event.
+         * Handles the device orientation event and rotates the arrow.
          * @param {DeviceOrientationEvent} event - The orientation event object.
          */
         function handleOrientation(event) {
-            const alpha = event.alpha;
-            const webkitCompassHeading = event.webkitCompassHeading;
+            const alpha = event.alpha; // z-axis rotation
+            const webkitCompassHeading = event.webkitCompassHeading; // iOS specific
 
-            let heading = 0;
+            let magneticHeading = 0;
 
-            // Use webkitCompassHeading if available (more reliable on iOS)
-            if (typeof webkitCompassHeading !== 'undefined' && webkitCompassHeading !== null) {
-                heading = -webkitCompassHeading;
-            } 
-            // Fallback to the alpha value for other devices (e.g., Android)
-            else if (typeof alpha !== 'undefined' && alpha !== null) {
-                // *** FIX: Rotate in the opposite direction of the device's turn ***
-                heading = -alpha;
+            if (webkitCompassHeading !== undefined && webkitCompassHeading !== null) {
+                // Use the direct heading from iOS devices
+                magneticHeading = webkitCompassHeading;
+            } else if (alpha !== undefined && alpha !== null) {
+                // For Android, calculate heading from alpha. 0 is North.
+                // We use (360 - alpha) because the alpha value increases counter-clockwise.
+                magneticHeading = (360 - alpha);
             } else {
                 messageDisplay.textContent = 'Could not retrieve orientation data.';
-                messageDisplay.style.display = 'block';
                 return;
             }
 
-            // Rotate the arrow to point to North.
+            // Correct for magnetic declination to get True North
+            const trueHeading = (magneticHeading + magneticDeclination + 360) % 360;
+
+            // Rotate the arrow. We use a negative value because the CSS rotate
+            // is clockwise, and we want the arrow to point opposite to the device's turn.
             if (arrow) {
-                arrow.style.transform = `rotate(${heading}deg)`;
+                arrow.style.transform = `rotate(${-trueHeading}deg)`;
             }
 
-            // Update the heading display with the rounded value
-            let displayHeading = 0;
-            if (typeof webkitCompassHeading !== 'undefined' && webkitCompassHeading !== null) {
-                displayHeading = webkitCompassHeading;
-            } else {
-                displayHeading = (360 - alpha) % 360;
-            }
-
+            // Update the heading display
             if (headingDisplay) {
-                headingDisplay.textContent = `${Math.round(displayHeading)}°`;
+                headingDisplay.textContent = `${Math.round(trueHeading)}°`;
             }
         }
     </script>
