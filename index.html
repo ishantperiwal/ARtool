@@ -3,123 +3,163 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Device Orientation Demo</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <title>Digital Compass</title>
     <style>
+        /* General styling for the body to center content */
         body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
             font-family: 'Inter', sans-serif;
+            flex-direction: column;
+            color: #333;
         }
-        #compass-rose {
-            transition: transform 0.2s ease-out;
+
+        /* Container for the compass */
+        #compass-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        /* The compass dial */
+        #compass-dial {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            background-image: url('https://i.imgur.com/7gHbbjN.png'); /* A simple compass rose image */
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        /* The compass needle/arrow */
+        #compass-arrow {
+            width: 0;
+            height: 0;
+            border-left: 15px solid transparent;
+            border-right: 15px solid transparent;
+            border-bottom: 120px solid #e74c3c; /* Red color for the north-pointing part */
+            position: absolute;
+            top: 30px; /* Position arrow correctly */
+            transform-origin: bottom center;
+            transition: transform 0.5s ease-in-out;
+            z-index: 10;
+        }
+
+        /* A pivot point for the arrow */
+        #compass-arrow::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: #333;
+            border-radius: 50%;
+            left: -10px;
+            bottom: -130px;
+        }
+
+        /* Heading display */
+        #heading-display {
+            margin-top: 30px;
+            font-size: 1.5em;
+            font-weight: bold;
+            background-color: #fff;
+            padding: 10px 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        /* Message for devices without sensor support */
+        #no-sensor-message {
+            display: none;
+            color: #e74c3c;
+            text-align: center;
+            padding: 20px;
         }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
 </head>
-<body class="bg-gray-900 text-white flex flex-col items-center justify-center h-screen overflow-hidden">
+<body>
 
-    <div id="permission-overlay" class="absolute inset-0 bg-gray-900 bg-opacity-95 flex flex-col items-center justify-center z-20">
-        <h1 class="text-2xl font-bold mb-4">Device Orientation Access</h1>
-        <p class="text-center mb-6 max-w-sm">This page needs access to your device's motion sensors to show you its orientation relative to North.</p>
-        <button id="permission-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg">
-            Grant Permission
-        </button>
+    <div id="compass-container">
+        <div id="compass-dial"></div>
+        <div id="compass-arrow"></div>
     </div>
 
-    <div class="text-center mb-8">
-        <h1 class="text-4xl font-bold">Device Orientation</h1>
-        <p class="text-gray-400">Your phone's angle relative to North</p>
-    </div>
-
-    <div class="relative w-64 h-64 flex items-center justify-center mb-8">
-        <!-- Compass background -->
-        <svg class="absolute w-full h-full" viewBox="0 0 100 100">
-            <circle cx="50" cy="50" r="48" fill="none" stroke="#4A5568" stroke-width="2"/>
-            <line x1="50" y1="2" x2="50" y2="10" stroke="#CBD5E0" stroke-width="2"/>
-            <text x="50" y="18" font-size="8" fill="#CBD5E0" text-anchor="middle">N</text>
-            <line x1="50" y1="98" x2="50" y2="90" stroke="#CBD5E0" stroke-width="1"/>
-             <text x="50" y="86" font-size="6" fill="#CBD5E0" text-anchor="middle">S</text>
-            <line x1="2" y1="50" x2="10" y2="50" stroke="#CBD5E0" stroke-width="1"/>
-            <text x="16" y="53" font-size="6" fill="#CBD5E0" text-anchor="middle">W</text>
-            <line x1="98" y1="50" x2="90" y2="50" stroke="#CBD5E0" stroke-width="1"/>
-            <text x="84" y="53" font-size="6" fill="#CBD5E0" text-anchor="middle">E</text>
-        </svg>
-        <!-- Compass Needle -->
-        <div id="compass-rose" class="w-full h-full">
-             <svg class="w-full h-full" viewBox="0 0 100 100">
-                <polygon points="50,10 55,50 50,90 45,50" fill="#E53E3E"/>
-            </svg>
-        </div>
-    </div>
-
-    <div class="bg-gray-800 p-6 rounded-lg shadow-xl text-center min-w-[120px]">
-        <span class="text-2xl font-mono" id="heading-value">--</span>
-        <span class="text-2xl font-mono">°</span>
+    <div id="heading-display">--°</div>
+    <div id="no-sensor-message">
+        Your device does not support the required orientation sensors.
     </div>
 
     <script>
-        const permissionButton = document.getElementById('permission-button');
-        const permissionOverlay = document.getElementById('permission-overlay');
-        const headingValue = document.getElementById('heading-value');
-        const compassRose = document.getElementById('compass-rose');
+        // Get references to the DOM elements
+        const arrow = document.getElementById('compass-arrow');
+        const headingDisplay = document.getElementById('heading-display');
+        const noSensorMessage = document.getElementById('no-sensor-message');
 
-        // This flag will prevent updates during the initial stabilization period.
-        let isCalibrating = false;
+        // Check if the DeviceOrientationEvent is supported
+        if (window.DeviceOrientationEvent) {
+            // Add an event listener for device orientation
+            window.addEventListener('deviceorientation', handleOrientation);
+        } else {
+            // Display a message if the API is not supported
+            document.getElementById('compass-container').style.display = 'none';
+            headingDisplay.style.display = 'none';
+            noSensorMessage.style.display = 'block';
+            console.error("DeviceOrientationEvent is not supported by your browser.");
+        }
 
+        /**
+         * Handles the device orientation event.
+         * @param {DeviceOrientationEvent} event - The orientation event object.
+         */
         function handleOrientation(event) {
-            // If we are in the calibration period, do nothing.
-            if (isCalibrating) {
+            // The 'alpha' property gives the direction the device is facing in degrees (0-360)
+            // 'webkitCompassHeading' is for iOS devices
+            const alpha = event.alpha;
+            const webkitCompassHeading = event.webkitCompassHeading;
+
+            let heading = 0;
+
+            if (webkitCompassHeading !== undefined && webkitCompassHeading !== null) {
+                // Use webkitCompassHeading if available (iOS)
+                heading = webkitCompassHeading;
+            } else if (alpha !== undefined && alpha !== null) {
+                // Use alpha, but it needs to be adjusted.
+                // The alpha value is 0 when the device points to North, but we need to rotate the compass
+                // in the opposite direction, so we use 360 - alpha.
+                heading = 360 - alpha;
+            } else {
+                 // Display a message if no heading data is available
+                noSensorMessage.textContent = 'Could not retrieve orientation data.';
+                noSensorMessage.style.display = 'block';
                 return;
             }
 
-            // Use webkitCompassHeading for iOS compatibility, otherwise use the standard alpha.
-            const heading = event.webkitCompassHeading || event.alpha;
-            
-            if (heading !== null) {
-                headingValue.textContent = Math.round(heading);
-                // The compass rose's needle points North, so we rotate it by the negative of the device heading to align it.
-                compassRose.style.transform = `rotate(${-heading}deg)`;
-            } else {
-                headingValue.textContent = 'N/A';
+            // Rotate the arrow to point to North
+            // We apply a rotation transform to the arrow element.
+            if (arrow) {
+                arrow.style.transform = `rotate(${heading}deg)`;
+            }
+
+            // Update the heading display with the rounded value
+            if (headingDisplay) {
+                headingDisplay.textContent = `${Math.round(heading)}°`;
             }
         }
-
-        function requestAccess() {
-            // For iOS 13+ and some modern browsers, we need to explicitly request permission
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') {
-                            permissionOverlay.style.display = 'none';
-                            headingValue.textContent = '...'; // Indicate calibration
-                            isCalibrating = true;
-
-                            window.addEventListener('deviceorientation', handleOrientation);
-
-                            // Set a timeout to allow sensors to stabilize
-                            setTimeout(() => {
-                                isCalibrating = false;
-                            }, 500); // 500ms stabilization period
-                        } else {
-                            // Using a custom message box instead of alert
-                            const deniedMsg = document.createElement('div');
-                            deniedMsg.textContent = 'Permission was denied. The compass cannot be displayed.';
-                            deniedMsg.className = 'absolute top-5 bg-red-500 text-white p-4 rounded-lg shadow-lg';
-                            document.body.appendChild(deniedMsg);
-                            setTimeout(() => deniedMsg.remove(), 3000);
-                        }
-                    })
-                    .catch(console.error);
-            } else {
-                // For older browsers that don't require explicit permission
-                permissionOverlay.style.display = 'none';
-                window.addEventListener('deviceorientation', handleOrientation);
-            }
-        }
-
-        permissionButton.addEventListener('click', requestAccess);
-
     </script>
+
 </body>
 </html>
