@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Web Compass with Calibration</title>
+    <title>Web Compass with Calibration & Geolocation</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
@@ -69,6 +69,10 @@
             <span class="text-2xl font-light text-gray-400 align-top">°</span>
         </div>
         <div id="heading-direction" class="text-xl text-gray-400 font-medium mt-1">Waiting...</div>
+        <!-- Geolocation Display -->
+        <div id="location-display" class="text-center mt-4 text-gray-400 text-sm">
+            <p>Lat: <span id="lat-value">--</span> | Lon: <span id="lon-value">--</span></p>
+        </div>
     </div>
     
     <div id="error-message" class="hidden absolute bottom-4 bg-red-500 text-white text-center p-3 rounded-lg shadow-lg"></div>
@@ -83,11 +87,10 @@
             const compassRose = document.querySelector('.compass-rose');
             const headingValue = document.getElementById('heading-value');
             const headingDirection = document.getElementById('heading-direction');
+            const latValue = document.getElementById('lat-value');
+            const lonValue = document.getElementById('lon-value');
             const errorMessage = document.getElementById('error-message');
 
-            // --- Calibration Settings ---
-            // Total degrees of rotation required to pass calibration.
-            // A figure-8 motion involves rotation on multiple axes. 720 degrees (2 full spins) is a good starting point.
             const ROTATION_THRESHOLD = 720; 
             let totalRotation = 0;
             let lastMotionTimestamp = 0;
@@ -111,42 +114,32 @@
                 compassRose.style.transform = `rotate(${rotation}deg)`;
             }
             
-            /**
-             * This function is called once enough movement is detected.
-             * It removes the motion listener and starts the orientation listeners.
-             */
             function onCalibrationComplete() {
                 window.removeEventListener('devicemotion', handleMotion);
                 calibrationOverlay.classList.add('hidden');
                 compassUI.classList.remove('hidden');
-                compassUI.classList.add('flex'); // Make it visible
+                compassUI.classList.add('flex');
                 startCompass();
+                startGeolocation(); // Start getting location after calibration
             }
 
-            /**
-             * Handles devicemotion events to track total rotation for calibration.
-             */
             function handleMotion(event) {
-                // Use performance.now() for a more reliable time delta
                 const now = performance.now();
                 if (lastMotionTimestamp === 0) {
                     lastMotionTimestamp = now;
-                    return; // Skip first frame
+                    return;
                 }
-                const deltaTime = (now - lastMotionTimestamp) / 1000; // Time in seconds
+                const deltaTime = (now - lastMotionTimestamp) / 1000;
                 lastMotionTimestamp = now;
 
                 if (event.rotationRate) {
                     const { alpha, beta, gamma } = event.rotationRate;
-                    // Calculate the magnitude of the rotation vector
                     const magnitude = Math.sqrt(alpha*alpha + beta*beta + gamma*gamma);
-                    
-                    if (magnitude > 1) { // Ignore tiny movements
+                    if (magnitude > 1) {
                         totalRotation += magnitude * deltaTime;
                     }
                 }
                 
-                // Update progress bar
                 const progress = Math.min(100, (totalRotation / ROTATION_THRESHOLD) * 100);
                 progressBar.style.width = `${progress}%`;
 
@@ -155,21 +148,16 @@
                 }
             }
 
-            /**
-             * Starts listening for movement to calibrate.
-             */
             function startCalibration() {
                 permissionOverlay.classList.add('hidden');
                 calibrationOverlay.classList.remove('hidden');
                 calibrationOverlay.classList.add('flex');
-
                 lastMotionTimestamp = 0;
                 totalRotation = 0;
 
                 if ('DeviceMotionEvent' in window) {
                     window.addEventListener('devicemotion', handleMotion);
                 } else {
-                    // If motion events aren't supported, skip calibration and go to compass
                     showError("Motion sensor not found. Skipping calibration.");
                     onCalibrationComplete();
                 }
@@ -226,13 +214,50 @@
                     showError('Compass functionality is not supported by your browser.');
                 }
             }
+            
+            /**
+             * Starts watching for geolocation data.
+             */
+            function startGeolocation() {
+                if ('geolocation' in navigator) {
+                    navigator.geolocation.watchPosition(
+                        (position) => {
+                            latValue.textContent = position.coords.latitude.toFixed(6);
+                            lonValue.textContent = position.coords.longitude.toFixed(6);
+                        },
+                        (error) => {
+                            let msg = "Location error: ";
+                            switch(error.code) {
+                                case error.PERMISSION_DENIED:
+                                    msg += "User denied the request for Geolocation.";
+                                    break;
+                                case error.POSITION_UNAVAILABLE:
+                                    msg += "Location information is unavailable.";
+                                    break;
+                                case error.TIMEOUT:
+                                    msg += "The request to get user location timed out.";
+                                    break;
+                                default:
+                                    msg += "An unknown error occurred.";
+                                    break;
+                            }
+                            showError(msg);
+                        },
+                        {
+                            enableHighAccuracy: true, // Use GPS if available
+                            timeout: 10000,
+                            maximumAge: 0
+                        }
+                    );
+                } else {
+                    showError("Geolocation is not supported by your browser.");
+                }
+            }
 
             permissionButton.addEventListener('click', () => {
-                // First, request permission for DeviceOrientationEvent (required for iOS)
                 if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                     DeviceOrientationEvent.requestPermission().then(orientationState => {
                         if (orientationState === 'granted') {
-                            // Then, request permission for DeviceMotionEvent
                             if (typeof DeviceMotionEvent.requestPermission === 'function') {
                                 DeviceMotionEvent.requestPermission().then(motionState => {
                                     if (motionState === 'granted') {
@@ -242,7 +267,6 @@
                                     }
                                 }).catch(err => showError('Error requesting motion permission.'));
                             } else {
-                                // For non-iOS 13+ browsers
                                 startCalibration();
                             }
                         } else {
@@ -250,7 +274,6 @@
                         }
                     }).catch(err => showError('Error requesting orientation permission.'));
                 } else {
-                    // For all other browsers
                     startCalibration();
                 }
             });
