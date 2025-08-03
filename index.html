@@ -10,15 +10,25 @@
         body {
             font-family: 'Inter', sans-serif;
             margin: 0;
-            overflow: hidden; /* Prevent scrollbars during AR */
+            overflow: hidden; /* Prevent scrollbars */
         }
-        /* Prevents flashing of the button before WebXR availability is checked */
-        #ar-button {
-            display: none;
+        /* The container for the entire AR experience */
+        #ar-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: none; /* Hidden by default */
         }
-        /* Ensure canvas doesn't interfere with UI layout before AR starts */
-        canvas {
-            display: block;
+        /* The 3D canvas needs to be behind the UI */
+        #ar-container canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
         }
         /* The dedicated overlay for in-AR UI */
         #ar-overlay {
@@ -26,7 +36,7 @@
             top: 0;
             left: 0;
             right: 0;
-            z-index: 10;
+            z-index: 2; /* Ensures UI is on top of the canvas */
             padding: 1rem;
             text-align: center;
             background: linear-gradient(to bottom, rgba(0,0,0,0.5), rgba(0,0,0,0));
@@ -41,7 +51,7 @@
         <p class="text-lg text-gray-300 mb-8">
             Find a friend and a well-lit room to play!
         </p>
-        <button id="ar-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-xl transition-transform duration-200 transform hover:scale-105">
+        <button id="ar-button" style="display: none;" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-xl transition-transform duration-200 transform hover:scale-105">
             Start AR
         </button>
         <div id="status-message" class="mt-8 text-gray-400"></div>
@@ -51,11 +61,14 @@
         </div>
     </div>
 
-    <!-- In-AR UI Overlay -->
-    <div id="ar-overlay" class="hidden">
-        <p id="instructions" class="text-xl text-white mb-4"></p>
-        <div id="stabilization-message" class="hidden mt-4 text-yellow-400">
-            Move your device slowly to scan the area.
+    <!-- AR Experience Container -->
+    <div id="ar-container">
+        <!-- In-AR UI Overlay -->
+        <div id="ar-overlay">
+            <p id="instructions" class="text-xl text-white mb-4"></p>
+            <div id="stabilization-message" class="hidden mt-4 text-yellow-400">
+                Move your device slowly to scan the area.
+            </div>
         </div>
     </div>
 
@@ -90,6 +103,7 @@
 
         // --- UI Elements ---
         const initialUiContainer = document.getElementById('initial-ui-container');
+        const arContainer = document.getElementById('ar-container');
         const arOverlay = document.getElementById('ar-overlay');
         const arButton = document.getElementById('ar-button');
         const instructions = document.getElementById('instructions');
@@ -120,16 +134,17 @@
         // --- Initialize the AR Session ---
         async function onARSessionStart() {
             try {
-                // We don't need dom-overlay feature with this new structure
                 xrSession = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test']
                 });
 
-                document.body.appendChild(renderer.domElement);
-                
-                // Hide initial UI, show AR overlay
+                // Make body transparent and show AR container
+                document.body.style.backgroundColor = 'transparent';
                 initialUiContainer.style.display = 'none';
-                arOverlay.style.display = 'block';
+                arContainer.style.display = 'block';
+                
+                // Add the renderer's canvas to the AR container
+                arContainer.appendChild(renderer.domElement);
 
                 xrRefSpace = await xrSession.requestReferenceSpace('local');
                 const viewerSpace = await xrSession.requestReferenceSpace('viewer');
@@ -151,15 +166,17 @@
         
         // --- Handle AR Session End ---
         function onARSessionEnd() {
-            // Show initial UI, hide AR overlay
+            // Restore initial UI state
+            document.body.style.backgroundColor = ''; // Reverts to CSS color
+            document.body.classList.add('bg-gray-900');
             initialUiContainer.style.display = 'flex';
-            arOverlay.style.display = 'none';
+            arContainer.style.display = 'none';
             stabilizationMessage.style.display = 'none';
 
             if (hiddenObject) hiddenObject.visible = false;
             if (reticle) reticle.visible = false;
             
-            const restartButton = instructions.querySelector('button');
+            const restartButton = arOverlay.querySelector('button');
             if (restartButton) restartButton.remove();
 
             renderer.setAnimationLoop(null);
@@ -173,10 +190,9 @@
         function onXRFrame(time, frame) {
             if (!frame || !xrSession) return;
 
-            const viewerPose = frame.getViewerPose(xrRefSpace);
-            if (viewerPose) {
-                const view = viewerPose.views[0];
-                renderer.render(scene, camera); // Render first
+            const pose = frame.getViewerPose(xrRefSpace);
+            if (pose) {
+                const view = pose.views[0];
                 camera.matrix.fromArray(view.transform.matrix);
                 camera.projectionMatrix.fromArray(view.projectionMatrix);
                 camera.updateMatrixWorld(true);
@@ -186,16 +202,18 @@
                     if (hitTestResults.length > 0) {
                         stabilizationMessage.style.display = 'none';
                         const hit = hitTestResults[0];
-                        const pose = hit.getPose(xrRefSpace);
+                        const hitPose = hit.getPose(xrRefSpace);
                         if(reticle) {
                             reticle.visible = true;
-                            reticle.matrix.fromArray(pose.transform.matrix);
+                            reticle.matrix.fromArray(hitPose.transform.matrix);
                         }
                     } else {
                         stabilizationMessage.style.display = 'block';
                         if(reticle) reticle.visible = false;
                     }
                 }
+                
+                renderer.render(scene, camera);
             }
         }
 
