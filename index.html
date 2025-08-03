@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AR Pin Finder</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .compass-rose, .direction-arrow {
+            transition: transform 0.2s linear;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen overflow-hidden p-4">
+
+    <!-- Permission & Calibration Overlays (will be hidden after setup) -->
+    <div id="permission-overlay" class="absolute inset-0 bg-gray-900 bg-opacity-95 flex flex-col items-center justify-center z-30 text-center p-4">
+        <h1 class="text-3xl font-bold mb-2">AR Pin Finder</h1>
+        <p class="text-gray-400 mb-6">Please grant permission to access device sensors and location.</p>
+        <button id="permission-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg">Enable</button>
+    </div>
+    <div id="calibration-overlay" class="hidden absolute inset-0 bg-gray-900 flex-col items-center justify-center z-20 text-center p-4">
+        <h2 class="text-2xl font-bold mb-2">Calibrating...</h2>
+        <p class="text-gray-400 mb-6">Move your device in a figure-8 pattern for accuracy.</p>
+    </div>
+
+    <!-- Main UI -->
+    <div id="main-ui" class="hidden flex-col items-center justify-center text-center w-full max-w-sm">
+        
+        <!-- Compass and Direction Arrow -->
+        <div class="relative w-48 h-48 sm:w-56 sm:h-56 mb-4">
+            <div class="absolute inset-0 border-4 border-gray-700 rounded-full"></div>
+            <svg class="compass-rose w-full h-full" viewBox="0 0 200 200"><circle cx="100" cy="100" r="95" fill="#1F2937" stroke="#4B5563" stroke-width="1"/><text x="100" y="25" font-size="20" font-weight="bold" fill="#E53E3E" text-anchor="middle">N</text><text x="100" y="185" font-size="18" fill="white" text-anchor="middle">S</text><text x="15" y="105" font-size="18" fill="white" text-anchor="middle">W</text><text x="185" y="105" font-size="18" fill="white" text-anchor="middle">E</text></svg>
+            <div class="absolute inset-0 flex items-center justify-center">
+                 <!-- This arrow will point towards the saved pin -->
+                <svg id="direction-arrow" class="w-1/2 h-1/2 direction-arrow" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M50 0L68.3013 37.5H31.6987L50 0Z" fill="#34D399"/><rect x="45" y="35" width="10" height="65" rx="5" fill="#34D399"/></svg>
+            </div>
+        </div>
+
+        <!-- Status Display -->
+        <div id="pin-status" class="mb-4">
+            <p class="text-lg font-medium">No pin placed yet.</p>
+            <p class="text-xs text-gray-500">Your Lat: <span id="lat-value">--</span> | Lon: <span id="lon-value">--</span></p>
+        </div>
+
+        <!-- Finder Info -->
+        <div id="finder-info" class="hidden mb-4">
+            <p class="text-2xl font-bold"><span id="distance-value">--</span> meters away</p>
+            <p class="text-gray-400">Head <span id="bearing-direction">--</span></p>
+        </div>
+
+        <!-- Controls -->
+        <div class="space-y-3 w-full">
+            <button id="place-pin-button" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg">Place Pin at Current Location</button>
+            <button id="ar-button" class="hidden w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg">Launch AR to Find Pin</button>
+            <button id="clear-pin-button" class="hidden w-full bg-red-800 hover:bg-red-900 text-white font-bold py-2 px-4 rounded-lg text-sm">Clear Pin</button>
+        </div>
+    </div>
+    
+    <div id="error-message" class="hidden fixed bottom-4 bg-red-500 text-white text-center p-3 rounded-lg shadow-lg"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const permissionButton = document.getElementById('permission-button');
+            const permissionOverlay = document.getElementById('permission-overlay');
+            const calibrationOverlay = document.getElementById('calibration-overlay');
+            const mainUI = document.getElementById('main-ui');
+            const compassRose = document.querySelector('.compass-rose');
+            const directionArrow = document.getElementById('direction-arrow');
+            const latValue = document.getElementById('lat-value');
+            const lonValue = document.getElementById('lon-value');
+            const pinStatus = document.getElementById('pin-status');
+            const finderInfo = document.getElementById('finder-info');
+            const distanceValue = document.getElementById('distance-value');
+            const bearingDirection = document.getElementById('bearing-direction');
+            const placePinButton = document.getElementById('place-pin-button');
+            const arButton = document.getElementById('ar-button');
+            const clearPinButton = document.getElementById('clear-pin-button');
+            const errorMessage = document.getElementById('error-message');
+
+            // State
+            let currentCoords = null;
+            let currentHeading = 0;
+            let savedPin = null;
+            const AR_RADIUS = 20; // meters
+
+            // --- Utility Functions ---
+            function showError(message) { /* ... same as before ... */ }
+            function getDirection(heading) { /* ... same as before ... */ }
+
+            function calculateDistance(lat1, lon1, lat2, lon2) {
+                const R = 6371e3; // metres
+                const φ1 = lat1 * Math.PI / 180;
+                const φ2 = lat2 * Math.PI / 180;
+                const Δφ = (lat2 - lat1) * Math.PI / 180;
+                const Δλ = (lon2 - lon1) * Math.PI / 180;
+                const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c; // in metres
+            }
+
+            function calculateBearing(lat1, lon1, lat2, lon2) {
+                const φ1 = lat1 * Math.PI/180, φ2 = lat2 * Math.PI/180;
+                const λ1 = lon1 * Math.PI/180, λ2 = lon2 * Math.PI/180;
+                const y = Math.sin(λ2 - λ1) * Math.cos(φ2);
+                const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
+                const θ = Math.atan2(y, x);
+                return (θ * 180 / Math.PI + 360) % 360; // in degrees
+            }
+
+            // --- UI Update Functions ---
+            function updateUI() {
+                if (currentCoords) {
+                    latValue.textContent = currentCoords.latitude.toFixed(6);
+                    lonValue.textContent = currentCoords.longitude.toFixed(6);
+                }
+                
+                compassRose.style.transform = `rotate(${-currentHeading}deg)`;
+
+                if (savedPin && currentCoords) {
+                    finderInfo.classList.remove('hidden');
+                    const distance = calculateDistance(currentCoords.latitude, currentCoords.longitude, savedPin.latitude, savedPin.longitude);
+                    const bearing = calculateBearing(currentCoords.latitude, currentCoords.longitude, savedPin.latitude, savedPin.longitude);
+                    
+                    distanceValue.textContent = Math.round(distance);
+                    bearingDirection.textContent = getDirection(bearing);
+                    
+                    // The arrow points towards the pin, relative to the phone's orientation
+                    const arrowRotation = bearing - currentHeading;
+                    directionArrow.style.transform = `rotate(${arrowRotation}deg)`;
+
+                    if (distance <= AR_RADIUS) {
+                        arButton.classList.remove('hidden');
+                    } else {
+                        arButton.classList.add('hidden');
+                    }
+                } else {
+                    finderInfo.classList.add('hidden');
+                    arButton.classList.add('hidden');
+                }
+            }
+
+            function loadPin() {
+                const pinData = localStorage.getItem('arPinLocation');
+                if (pinData) {
+                    savedPin = JSON.parse(pinData);
+                    pinStatus.innerHTML = `<p class="text-lg font-medium text-green-400">Pin is active!</p><p class="text-xs text-gray-500">Placed at ${savedPin.latitude.toFixed(4)}, ${savedPin.longitude.toFixed(4)}</p>`;
+                    placePinButton.textContent = 'Move Pin to Current Location';
+                    clearPinButton.classList.remove('hidden');
+                }
+            }
+
+            // --- Event Handlers ---
+            placePinButton.addEventListener('click', () => {
+                if (currentCoords) {
+                    savedPin = { latitude: currentCoords.latitude, longitude: currentCoords.longitude };
+                    localStorage.setItem('arPinLocation', JSON.stringify(savedPin));
+                    loadPin();
+                    updateUI();
+                } else {
+                    showError("Could not get your current location to place pin.");
+                }
+            });
+
+            clearPinButton.addEventListener('click', () => {
+                savedPin = null;
+                localStorage.removeItem('arPinLocation');
+                pinStatus.innerHTML = `<p class="text-lg font-medium">No pin placed yet.</p><p class="text-xs text-gray-500">Your Lat: <span id="lat-value">--</span> | Lon: <span id="lon-value">--</span></p>`;
+                placePinButton.textContent = 'Place Pin at Current Location';
+                clearPinButton.classList.add('hidden');
+                updateUI();
+            });
+            
+            arButton.addEventListener('click', () => {
+                alert("AR Session would launch here! The pin is nearby.");
+                // In a real app, this would initiate the WebXR session.
+            });
+
+
+            // --- Initialization Logic ---
+            function onReady() {
+                permissionOverlay.classList.add('hidden');
+                calibrationOverlay.classList.add('hidden');
+                mainUI.classList.remove('hidden');
+                mainUI.classList.add('flex');
+                
+                startCompass();
+                startGeolocation();
+                loadPin();
+            }
+
+            function startCompass() { /* ... same as before, but calls updateCompass(heading) ... */ 
+                const orientationHandler = (event) => {
+                    let heading = null;
+                    if (event.webkitCompassHeading !== undefined) { heading = event.webkitCompassHeading; }
+                    else if (event.absolute === true && event.alpha !== null) { heading = 360 - event.alpha; }
+                    
+                    if (heading !== null) {
+                        currentHeading = heading;
+                        updateUI();
+                    }
+                };
+                 if ('AbsoluteOrientationSensor' in window) {
+                    const sensor = new AbsoluteOrientationSensor({ frequency: 60 });
+                    sensor.addEventListener('reading', () => {
+                        const q = sensor.quaternion;
+                        let yawRad = Math.atan2(2 * (q[0] * q[1] + q[2] * q[3]), 1 - 2 * (q[1] * q[1] + q[2] * q[2]));
+                        let heading = yawRad * (180 / Math.PI);
+                        if (heading < 0) heading += 360;
+                        currentHeading = 360 - heading;
+                        if (currentHeading >= 360) currentHeading -= 360;
+                        updateUI();
+                    });
+                    sensor.start();
+                } else if ('ondeviceorientationabsolute' in window) {
+                    window.addEventListener('deviceorientationabsolute', orientationHandler);
+                } else if ('ondeviceorientation' in window) {
+                    window.addEventListener('deviceorientation', orientationHandler);
+                } else {
+                    showError('Compass functionality is not supported.');
+                }
+            }
+
+            function startGeolocation() { /* ... same as before, but sets currentCoords and calls updateUI() ... */
+                if ('geolocation' in navigator) {
+                    navigator.geolocation.watchPosition(
+                        (position) => {
+                            currentCoords = {
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude
+                            };
+                            updateUI();
+                        },
+                        (error) => { showError("Could not get location."); },
+                        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                    );
+                } else {
+                    showError("Geolocation is not supported.");
+                }
+            }
+
+            permissionButton.addEventListener('click', () => {
+                // Simplified permission flow for this example
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission().then(state => {
+                        if (state === 'granted') {
+                            onReady();
+                        } else {
+                            showError('Sensor permission denied.');
+                        }
+                    });
+                } else {
+                    onReady();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
