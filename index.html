@@ -53,7 +53,7 @@
         </div>
     </div>
 
-    <div class="bg-gray-800 p-6 rounded-lg shadow-xl text-center">
+    <div class="bg-gray-800 p-6 rounded-lg shadow-xl text-center min-w-[120px]">
         <span class="text-2xl font-mono" id="heading-value">--</span>
         <span class="text-2xl font-mono">°</span>
     </div>
@@ -64,7 +64,15 @@
         const headingValue = document.getElementById('heading-value');
         const compassRose = document.getElementById('compass-rose');
 
+        // This flag will prevent updates during the initial stabilization period.
+        let isCalibrating = false;
+
         function handleOrientation(event) {
+            // If we are in the calibration period, do nothing.
+            if (isCalibrating) {
+                return;
+            }
+
             // Use webkitCompassHeading for iOS compatibility, otherwise use the standard alpha.
             const heading = event.webkitCompassHeading || event.alpha;
             
@@ -83,8 +91,16 @@
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
                         if (permissionState === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation);
                             permissionOverlay.style.display = 'none';
+                            headingValue.textContent = '...'; // Indicate calibration
+                            isCalibrating = true;
+
+                            window.addEventListener('deviceorientation', handleOrientation);
+
+                            // Set a timeout to allow sensors to stabilize
+                            setTimeout(() => {
+                                isCalibrating = false;
+                            }, 500); // 500ms stabilization period
                         } else {
                             // Using a custom message box instead of alert
                             const deniedMsg = document.createElement('div');
@@ -97,8 +113,8 @@
                     .catch(console.error);
             } else {
                 // For older browsers that don't require explicit permission
-                window.addEventListener('deviceorientation', handleOrientation);
                 permissionOverlay.style.display = 'none';
+                window.addEventListener('deviceorientation', handleOrientation);
             }
         }
 
