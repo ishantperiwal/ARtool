@@ -119,9 +119,7 @@
 
             // --- Clear Anchors Button ---
             document.getElementById('clear-button').addEventListener('click', () => {
-                // Removed confirm() dialog for better compatibility
                 localStorage.removeItem(ANCHORS_KEY);
-                // Reload to apply changes and clear the scene
                 window.location.reload();
             });
 
@@ -176,7 +174,6 @@
                 new THREE.BoxGeometry(0.1, 0.1, 0.1),
                 material
             );
-            // The anchor will control the object's position, so disable matrix auto-update
             mesh.matrixAutoUpdate = false;
             // Store the anchor and its mesh
             placedObjects.set(anchor, mesh);
@@ -214,53 +211,56 @@
 
                 // --- Hit Test Logic (to position the reticle) ---
                 if (hitTestSourceRequested === false) {
-                    session.requestReferenceSpace('viewer').then(referenceSpace => {
-                        session.requestHitTestSource({ space: referenceSpace }).then(source => {
+                    session.requestReferenceSpace('viewer').then(viewerSpace => {
+                        session.requestHitTestSource({ space: viewerSpace }).then(source => {
                             hitTestSource = source;
                         });
                     });
+
+                    // --- Session End Cleanup Logic ---
                     session.addEventListener('end', () => {
                         hitTestSourceRequested = false;
                         hitTestSource = null;
+                        
+                        // **FIX:** Clear placed objects when the session ends
+                        console.log("Session ended. Clearing placed objects.");
+                        for (const object of placedObjects.values()) {
+                            scene.remove(object);
+                        }
+                        placedObjects.clear();
                     });
+
                     hitTestSourceRequested = true;
                 }
 
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
                     if (hitTestResults.length > 0) {
-                        // Store the first hit result
                         hitTestResult = hitTestResults[0];
                         const pose = hitTestResult.getPose(referenceSpace);
                         reticle.visible = true;
                         reticle.matrix.fromArray(pose.transform.matrix);
                     } else {
-                        // Clear the result if no surface is found
                         hitTestResult = null;
                         reticle.visible = false;
                     }
                 }
 
                 // --- Anchor Persistence and Tracking Logic ---
-                // Check if any of our saved anchors are being tracked
                 for (const anchor of frame.trackedAnchors) {
                     if (savedAnchorUUIDs.has(anchor.anchorUUID) && !placedObjects.has(anchor)) {
-                        // Found a saved anchor that we haven't created an object for yet
                         console.log("Restoring object for anchor:", anchor.anchorUUID);
                         placeObject(anchor);
                     }
                 }
 
                 // --- Update Object Positions ---
-                // Update the position of all our placed objects based on their anchor's current pose
                 for (const [anchor, object] of placedObjects.entries()) {
-                    // getPose can be null if the anchor is temporarily not being tracked
                     const pose = frame.getPose(anchor.anchorSpace, referenceSpace);
                     if (pose) {
                         object.matrix.fromArray(pose.transform.matrix);
                         object.visible = true;
                     } else {
-                        // Hide the object if its anchor can't be found
                         object.visible = false;
                     }
                 }
