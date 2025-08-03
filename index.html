@@ -219,20 +219,10 @@
                             hitTestSource = source;
                         });
                     });
-
-                    // --- FIX: Add session end listener to clear state ---
                     session.addEventListener('end', () => {
                         hitTestSourceRequested = false;
                         hitTestSource = null;
-                        
-                        // Clear all placed objects from the scene and map
-                        for(const object of placedObjects.values()){
-                            scene.remove(object);
-                        }
-                        placedObjects.clear();
-                        console.log("Session ended. Cleared placed objects.");
                     });
-
                     hitTestSourceRequested = true;
                 }
 
