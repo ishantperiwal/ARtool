@@ -3,292 +3,245 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>True North Compass</title>
+    <title>Web Compass</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* General styling for the body to center content */
         body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #2c3e50; /* Darker background */
             font-family: 'Inter', sans-serif;
-            flex-direction: column;
-            color: #ecf0f1;
-            text-align: center;
-            padding: 10px;
-            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
         }
-
-        /* Container for the compass */
-        #compass-container {
-            position: relative;
-            width: 300px;
-            height: 300px;
-            background: #34495e;
-            border-radius: 50%;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2), 0 6px 6px rgba(0,0,0,0.2);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        /* The compass dial is now just a background circle */
-        #compass-dial {
-            width: 100%;
-            height: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-            border-radius: 50%;
-            border: 2px solid #7f8c8d;
-        }
-
-        /* Styling for the N, E, S, W markers */
-        .cardinal-direction {
-            position: absolute;
-            font-size: 1.8em;
-            font-weight: bold;
-            color: #ecf0f1;
-            transform: translate(-50%, -50%); /* Center the letters */
-        }
-        .north { top: 20px; left: 50%; }
-        .south { bottom: 5px; left: 50%; }
-        .east { top: 50%; right: 5px; }
-        .west { top: 50%; left: 25px; }
-
-
-        /* The compass needle/arrow */
-        #compass-arrow {
-            width: 0;
-            height: 0;
-            border-left: 15px solid transparent;
-            border-right: 15px solid transparent;
-            border-bottom: 120px solid #e74c3c; /* Red color for the north-pointing part */
-            position: absolute;
-            top: 30px; /* Position arrow correctly */
-            transform-origin: bottom center;
-            transition: transform 0.5s ease-out;
-            z-index: 10;
-        }
-
-        /* A pivot point for the arrow */
-        #compass-arrow::after {
-            content: '';
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            background: #ecf0f1;
-            border-radius: 50%;
-            left: -10px;
-            bottom: -130px;
-        }
-
-        /* Heading display */
-        #heading-display {
-            font-size: 2em;
-            font-weight: bold;
-            background-color: #34495e;
-            padding: 10px 25px;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            min-width: 80px;
-        }
-
-        /* Button to start the compass */
-        #start-btn {
-            margin-top: 20px;
-            padding: 15px 30px;
-            font-size: 1em;
-            font-weight: bold;
-            color: #fff;
-            background-color: #2980b9;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            transition: background-color 0.3s, transform 0.1s;
-        }
-
-        #start-btn:hover {
-            background-color: #3498db;
-        }
-
-        #start-btn:active {
-            transform: scale(0.98);
-        }
-
-        /* Message for errors or status */
-        #message-display {
-            color: #bdc3c7;
-            margin-top: 15px;
-            padding: 10px;
-            max-width: 90%;
-            min-height: 40px;
-            font-style: italic;
+        /* Prevents the compass from "snapping" when crossing the 0/360 degree mark */
+        .compass-rose {
+            transition: transform 0.2s linear;
         }
     </style>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen overflow-hidden">
 
-    <div id="compass-container">
-        <!-- Cardinal direction markers -->
-        <div class="cardinal-direction north">N</div>
-        <div class="cardinal-direction east">E</div>
-        <div class="cardinal-direction south">S</div>
-        <div class="cardinal-direction west">W</div>
-
-        <div id="compass-dial"></div>
-        <div id="compass-arrow"></div>
+    <!-- Permission Overlay: This is crucial for iOS 13+ and good practice for all browsers -->
+    <div id="permission-overlay" class="absolute inset-0 bg-gray-900 bg-opacity-90 flex flex-col items-center justify-center z-20">
+        <div class="text-center">
+            <h1 class="text-3xl font-bold mb-2">Web Compass</h1>
+            <p class="text-gray-400 mb-6">Please grant permission to access device sensors.</p>
+            <button id="permission-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
+                Enable Compass
+            </button>
+        </div>
     </div>
 
-    <div id="heading-display">--°</div>
-    <div id="message-display">(Points to True North)</div>
+    <!-- Main Compass UI -->
+    <div id="compass-ui" class="flex flex-col items-center justify-center opacity-0 transition-opacity duration-500">
+        <div class="relative w-64 h-64 sm:w-80 sm:h-80">
+            <!-- Static outer bezel of the compass -->
+            <div class="absolute inset-0 border-8 border-gray-700 rounded-full shadow-2xl"></div>
+            <!-- The rotating compass rose SVG -->
+            <div id="compass-rose-container" class="w-full h-full">
+                 <svg class="compass-rose w-full h-full" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="100" cy="100" r="95" fill="#1F2937" stroke="#4B5563" stroke-width="2"/>
+                    <!-- Cardinal Directions -->
+                    <text x="100" y="25" font-family="Inter, sans-serif" font-size="20" font-weight="bold" fill="#E53E3E" text-anchor="middle">N</text>
+                    <text x="100" y="185" font-family="Inter, sans-serif" font-size="18" fill="white" text-anchor="middle">S</text>
+                    <text x="15" y="105" font-family="Inter, sans-serif" font-size="18" fill="white" text-anchor="middle">W</text>
+                    <text x="185" y="105" font-family="Inter, sans-serif" font-size="18" fill="white" text-anchor="middle">E</text>
+                    <!-- Ticks -->
+                    <line x1="100" y1="10" x2="100" y2="20" stroke="white" stroke-width="2"/>
+                    <line x1="100" y1="180" x2="100" y2="190" stroke="white" stroke-width="2"/>
+                    <line x1="10" y1="100" x2="20" y2="100" stroke="white" stroke-width="2"/>
+                    <line x1="180" y1="100" x2="190" y2="100" stroke="white" stroke-width="2"/>
+                </svg>
+            </div>
+            <!-- The static indicator needle at the top -->
+            <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-b-[24px] border-b-red-600"></div>
+        </div>
+
+        <!-- Digital Heading Display -->
+        <div class="text-center mt-6">
+            <span id="heading-value" class="text-6xl font-bold tracking-tighter">--</span>
+            <span class="text-2xl font-light text-gray-400 align-top">°</span>
+        </div>
+        <div id="heading-direction" class="text-xl text-gray-400 font-medium mt-1">Waiting for data...</div>
+    </div>
     
-    <button id="start-btn">Start Compass</button>
+    <!-- Error Message Display -->
+    <div id="error-message" class="hidden absolute bottom-4 bg-red-500 text-white text-center p-3 rounded-lg shadow-lg"></div>
+
 
     <script>
-        const arrow = document.getElementById('compass-arrow');
-        const headingDisplay = document.getElementById('heading-display');
-        const startBtn = document.getElementById('start-btn');
-        const messageDisplay = document.getElementById('message-display');
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Element References
+            const permissionButton = document.getElementById('permission-button');
+            const permissionOverlay = document.getElementById('permission-overlay');
+            const compassUI = document.getElementById('compass-ui');
+            const compassRose = document.querySelector('.compass-rose');
+            const headingValue = document.getElementById('heading-value');
+            const headingDirection = document.getElementById('heading-direction');
+            const errorMessage = document.getElementById('error-message');
 
-        let magneticDeclination = 0; // This will hold the correction value
+            let lastHeading = 0;
 
-        /**
-         * Main starting function, triggered by the button.
-         * It orchestrates the permission requests and API calls.
-         */
-        function start() {
-            startBtn.style.display = 'none'; // Hide button once clicked
-            
-            // 1. Get Location for True North correction
-            getLocation();
-        }
-
-        /**
-         * Asks for geolocation permission and fetches coordinates.
-         */
-        function getLocation() {
-            messageDisplay.textContent = 'Requesting location for True North correction...';
-            if ('geolocation' in navigator) {
-                navigator.geolocation.getCurrentPosition(
-                    position => {
-                        const { latitude, longitude } = position.coords;
-                        fetchMagneticDeclination(latitude, longitude);
-                    },
-                    error => {
-                        messageDisplay.textContent = 'Location denied. Compass will point to Magnetic North.';
-                        console.warn('Geolocation permission denied:', error.message);
-                        // If location fails, proceed without correction
-                        requestOrientationPermission();
-                    }
-                );
-            } else {
-                messageDisplay.textContent = 'Geolocation not available. Compass will point to Magnetic North.';
-                // If geolocation is not supported, proceed without correction
-                requestOrientationPermission();
+            /**
+             * Displays an error message to the user.
+             * @param {string} message - The error message to show.
+             */
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorMessage.classList.remove('hidden');
+                setTimeout(() => {
+                    errorMessage.classList.add('hidden');
+                }, 5000);
             }
-        }
 
-        /**
-         * Fetches magnetic declination from NOAA's API via a CORS proxy.
-         * @param {number} lat - The user's latitude.
-         * @param {number} lon - The user's longitude.
-         */
-        async function fetchMagneticDeclination(lat, lon) {
-            messageDisplay.textContent = 'Fetching magnetic correction...';
-            // We use a CORS proxy to access the NOAA API from the browser.
-            const apiUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://www.ngdc.noaa.gov/geomag-web/calculators/calculateDeclination?lat1=${lat}&lon1=${lon}&resultFormat=json`)}`;
-            
-            try {
-                const response = await fetch(apiUrl);
-                if (!response.ok) throw new Error('Network response was not ok.');
-                
-                const data = await response.json();
-                const result = JSON.parse(data.contents); // The actual JSON is inside the 'contents' property
-                
-                if (result && result.result && result.result[0] && result.result[0].declination) {
-                    magneticDeclination = parseFloat(result.result[0].declination);
-                    messageDisplay.textContent = `Correction applied: ${magneticDeclination.toFixed(2)}°`;
-                } else {
-                    throw new Error('Invalid API response format.');
+            /**
+             * Converts a heading in degrees to a cardinal direction.
+             * @param {number} heading - The heading in degrees (0-360).
+             * @returns {string} The cardinal direction (e.g., N, NE, E).
+             */
+            function getDirection(heading) {
+                const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                const index = Math.round(heading / 45) % 8;
+                return directions[index];
+            }
+
+            /**
+             * Updates the compass UI with the new heading.
+             * @param {number} heading - The new compass heading in degrees.
+             */
+            function updateCompass(heading) {
+                if (compassUI.style.opacity === '0') {
+                    compassUI.style.opacity = '1';
                 }
-            } catch (error) {
-                messageDisplay.textContent = 'Could not fetch correction. Using Magnetic North.';
-                console.error('Failed to fetch magnetic declination:', error);
-            } finally {
-                // Whether fetching succeeded or failed, we now ask for orientation permission.
-                requestOrientationPermission();
-            }
-        }
 
-        /**
-         * Requests permission for device orientation sensors.
-         */
-        function requestOrientationPermission() {
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation, true);
-                        } else {
-                            messageDisplay.textContent = 'Orientation sensor permission was denied.';
-                        }
-                    })
-                    .catch(error => {
-                        messageDisplay.textContent = 'Error requesting sensor permission.';
-                        console.error(error);
-                    });
-            } else if ('DeviceOrientationEvent' in window) {
-                window.addEventListener('deviceorientation', handleOrientation, true);
-            } else {
-                messageDisplay.textContent = 'Your device does not support orientation sensors.';
-            }
-        }
-        
-        startBtn.addEventListener('click', start);
-
-        /**
-         * Handles the device orientation event and rotates the arrow.
-         * @param {DeviceOrientationEvent} event - The orientation event object.
-         */
-        function handleOrientation(event) {
-            const alpha = event.alpha; // z-axis rotation
-            const webkitCompassHeading = event.webkitCompassHeading; // iOS specific
-
-            let magneticHeading = 0;
-
-            if (webkitCompassHeading !== undefined && webkitCompassHeading !== null) {
-                // Use the direct heading from iOS devices
-                magneticHeading = webkitCompassHeading;
-            } else if (alpha !== undefined && alpha !== null) {
-                // For Android, calculate heading from alpha. 0 is North.
-                // We use (360 - alpha) because the alpha value increases counter-clockwise.
-                magneticHeading = (360 - alpha);
-            } else {
-                messageDisplay.textContent = 'Could not retrieve orientation data.';
-                return;
+                heading = Math.round(heading);
+                headingValue.textContent = heading;
+                headingDirection.textContent = getDirection(heading);
+                
+                // We rotate the compass rose opposite to the heading to make 'N' point up.
+                // This ensures the shortest rotation path, preventing the "spin back" issue.
+                const rotation = -heading;
+                compassRose.style.transform = `rotate(${rotation}deg)`;
             }
 
-            // Correct for magnetic declination to get True North
-            const trueHeading = (magneticHeading + magneticDeclination + 360) % 360;
+            /**
+             * Starts the compass functionality after permissions are granted.
+             */
+            function startCompass() {
+                // Hide the permission overlay and show the compass UI
+                permissionOverlay.style.display = 'none';
 
-            // Rotate the arrow. We use a negative value because the CSS rotate
-            // is clockwise, and we want the arrow to point opposite to the device's turn.
-            if (arrow) {
-                arrow.style.transform = `rotate(${-trueHeading}deg)`;
+                // --- Strategy 1: The Modern `AbsoluteOrientationSensor` ---
+                // This is the preferred API. It fuses data from accelerometer, gyroscope,
+                // and magnetometer for a more stable and accurate reading.
+                try {
+                    if ('AbsoluteOrientationSensor' in window) {
+                        const sensor = new AbsoluteOrientationSensor({ frequency: 60 });
+
+                        sensor.addEventListener('reading', () => {
+                            // The sensor provides orientation as a quaternion.
+                            const q = sensor.quaternion;
+                            // Formula to convert quaternion to a compass heading (yaw).
+                            // We calculate the yaw (rotation around the z-axis).
+                            let yawRad = Math.atan2(2 * (q[0] * q[1] + q[2] * q[3]), 1 - 2 * (q[1] * q[1] + q[2] * q[2]));
+                            
+                            // Convert radians to degrees.
+                            let heading = yawRad * (180 / Math.PI);
+                            
+                            // The result might be in the range -180 to 180. Adjust to 0-360.
+                            if (heading < 0) {
+                                heading += 360;
+                            }
+                            
+                            // The heading needs to be inverted for a clockwise compass from North.
+                            heading = 360 - heading;
+                            if (heading >= 360) {
+                                heading -= 360;
+                            }
+
+                            updateCompass(heading);
+                        });
+
+                        sensor.addEventListener('error', (event) => {
+                            if (event.error.name === 'NotAllowedError') {
+                                showError('Permission to access sensor was denied.');
+                            } else if (event.error.name === 'NotReadableError') {
+                                showError('Cannot connect to the sensor.');
+                                // If this fails, we could attempt the fallback here.
+                                startLegacyCompass();
+                            }
+                        });
+
+                        sensor.start();
+                        return; // Success, no need for fallbacks.
+                    }
+                } catch (error) {
+                     console.warn("AbsoluteOrientationSensor failed, trying fallback.", error);
+                }
+
+                // --- Strategy 2: Fallback to `DeviceOrientationEvent` ---
+                // This is necessary for older browsers or those without the Generic Sensor API.
+                startLegacyCompass();
+            }
+            
+            function startLegacyCompass() {
+                const orientationHandler = (event) => {
+                    let heading = null;
+
+                    // Case A: iOS devices (Safari) provide a non-standard `webkitCompassHeading`.
+                    if (event.webkitCompassHeading) {
+                        heading = event.webkitCompassHeading;
+                    }
+                    // Case B: Modern Chrome/Firefox on Android provide absolute alpha.
+                    // The `absolute` property must be true.
+                    else if (event.absolute === true && event.alpha !== null) {
+                        heading = 360 - event.alpha;
+                    }
+
+                    if (heading !== null) {
+                         if (heading < 0) heading += 360;
+                         if (heading >= 360) heading -= 360;
+                        updateCompass(heading);
+                    }
+                };
+                
+                // We listen for 'deviceorientationabsolute' first, which is Chrome's
+                // way of providing the magnetometer-based reading.
+                if ('ondeviceorientationabsolute' in window) {
+                    window.addEventListener('deviceorientationabsolute', orientationHandler);
+                }
+                // The standard 'deviceorientation' is the final fallback.
+                else if ('ondeviceorientation' in window) {
+                    window.addEventListener('deviceorientation', orientationHandler);
+                } else {
+                    showError('Compass functionality is not supported by your browser.');
+                }
             }
 
-            // Update the heading display
-            if (headingDisplay) {
-                headingDisplay.textContent = `${Math.round(trueHeading)}°`;
-            }
-        }
+
+            // --- Permission Handling ---
+            permissionButton.addEventListener('click', () => {
+                // iOS 13+ requires this specific function to be called on a user gesture.
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                startCompass();
+                            } else {
+                                showError('Permission to access device orientation was denied.');
+                            }
+                        })
+                        .catch(error => {
+                            console.error(error);
+                            showError('An error occurred while requesting permission.');
+                        });
+                } else {
+                    // For all other browsers (e.g., Chrome on Android), permission is
+                    // handled by the browser's standard prompt when the sensor is first accessed.
+                    startCompass();
+                }
+            });
+        });
     </script>
-
 </body>
 </html>
