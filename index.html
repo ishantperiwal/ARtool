@@ -14,6 +14,10 @@
         #ar-button {
             display: none;
         }
+        /* Make the container transparent during AR session to see the camera feed */
+        #main-container.ar-mode {
+            background-color: transparent;
+        }
         /* Simple spinner for loading state */
         .loader {
             border: 4px solid #f3f3f3;
@@ -58,7 +62,7 @@
         </div>
     </div>
 
-    <!-- Three.js and WebXR polyfill -->
+    <!-- Three.js Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script type="module">
@@ -85,6 +89,7 @@
         let hiddenObject = null; // The object to hide
         let gameState = 'INITIAL'; // INITIAL, HIDING, SEEKING
 
+        const mainContainer = document.getElementById('main-container');
         const arButton = document.getElementById('ar-button');
         const instructions = document.getElementById('instructions');
         const statusMessage = document.getElementById('status-message');
@@ -114,16 +119,24 @@
         // --- Initialize the AR Session ---
         async function onARSessionStart() {
             try {
+                // Append the renderer's canvas to the body
+                document.body.appendChild(renderer.domElement);
+
                 xrSession = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test', 'dom-overlay'],
-                    domOverlay: { root: document.getElementById('main-container') }
+                    domOverlay: { root: mainContainer }
                 });
 
-                document.body.appendChild(renderer.domElement);
+                // Add class to make the DOM overlay transparent
+                mainContainer.classList.add('ar-mode');
                 
                 xrRefSpace = await xrSession.requestReferenceSpace('local');
                 const viewerSpace = await xrSession.requestReferenceSpace('viewer');
                 xrHitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+
+                // Add event listeners for session events
+                xrSession.addEventListener('select', onSelect);
+                xrSession.addEventListener('end', onARSessionEnd);
 
                 // Hide UI elements that are not needed in AR
                 arButton.style.display = 'none';
@@ -140,10 +153,33 @@
                 unsupportedMessage.style.display = 'block';
             }
         }
+        
+        // --- Handle AR Session End ---
+        function onARSessionEnd() {
+            // Remove the transparent background class
+            mainContainer.classList.remove('ar-mode');
+
+            // Show the initial UI again
+            arButton.style.display = 'block';
+            instructions.innerHTML = "Find a friend and a well-lit room to play!";
+            statusMessage.style.display = 'block';
+
+            // Clean up objects
+            if (hiddenObject) hiddenObject.visible = false;
+            if (reticle) reticle.visible = false;
+            
+            // Remove any dynamically added buttons
+            const restartButton = instructions.querySelector('button');
+            if (restartButton) restartButton.remove();
+
+            // Stop the render loop
+            renderer.setAnimationLoop(null);
+            xrSession = null;
+        }
 
         // --- The Main Render Loop ---
         function onXRFrame(time, frame) {
-            if (!frame) return;
+            if (!frame || !xrSession) return;
 
             const viewerPose = frame.getViewerPose(xrRefSpace);
             if (viewerPose) {
@@ -175,6 +211,9 @@
         // --- Game Logic ---
         function setGameState(newState) {
             gameState = newState;
+            const restartButton = instructions.querySelector('button');
+            if (restartButton) restartButton.remove();
+
             switch (gameState) {
                 case 'HIDING':
                     instructions.innerText = "Player 1: Find a good spot and tap the screen to hide the object.";
@@ -186,16 +225,16 @@
                     instructions.innerHTML = "Player 2: Object hidden! <br> Hand the device over and find the hidden object.";
                     if (reticle) reticle.visible = false;
                     if(hiddenObject) hiddenObject.visible = true;
+                    
                     // Add a button to restart
-                    const restartButton = document.createElement('button');
-                    restartButton.innerText = 'Found It! (Play Again)';
-                    restartButton.className = 'bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg text-xl mt-4';
-                    restartButton.onclick = () => {
+                    const newRestartButton = document.createElement('button');
+                    newRestartButton.innerText = 'Found It! (Play Again)';
+                    newRestartButton.className = 'bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg text-xl mt-4 transition-transform duration-200 transform hover:scale-105';
+                    newRestartButton.onclick = () => {
                         setGameState('HIDING');
-                        restartButton.remove();
                     };
                     instructions.appendChild(document.createElement('br'));
-                    instructions.appendChild(restartButton);
+                    instructions.appendChild(newRestartButton);
                     break;
             }
         }
@@ -238,14 +277,8 @@
 
         // --- Event Listeners ---
         arButton.addEventListener('click', onARSessionStart);
-        // We listen for the 'select' event on the session for taps
-        document.addEventListener('DOMContentLoaded', () => {
-            checkXRSupport();
-            // We need to add the select listener after the session starts
-            navigator.xr.addEventListener('sessionstart', (event) => {
-                event.session.addEventListener('select', onSelect);
-            });
-        });
+        
+        document.addEventListener('DOMContentLoaded', checkXRSupport);
         
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
