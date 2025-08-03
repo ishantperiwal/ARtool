@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Digital Compass</title>
     <style>
         /* General styling for the body to center content */
@@ -12,10 +12,11 @@
             align-items: center;
             height: 100vh;
             margin: 0;
-            background-color: #f0f0f0;
+            background-color: #2c3e50; /* Darker background */
             font-family: 'Inter', sans-serif;
             flex-direction: column;
-            color: #333;
+            color: #ecf0f1;
+            text-align: center;
         }
 
         /* Container for the compass */
@@ -23,12 +24,13 @@
             position: relative;
             width: 300px;
             height: 300px;
-            background: #fff;
+            background: #34495e;
             border-radius: 50%;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2), 0 6px 6px rgba(0,0,0,0.2);
             display: flex;
             justify-content: center;
             align-items: center;
+            margin-bottom: 20px;
         }
         
         /* The compass dial */
@@ -42,6 +44,7 @@
             background-size: contain;
             background-repeat: no-repeat;
             background-position: center;
+            filter: invert(1); /* Make the dial white for dark mode */
         }
 
         /* The compass needle/arrow */
@@ -54,7 +57,7 @@
             position: absolute;
             top: 30px; /* Position arrow correctly */
             transform-origin: bottom center;
-            transition: transform 0.5s ease-in-out;
+            transition: transform 0.5s ease-out;
             z-index: 10;
         }
 
@@ -64,7 +67,7 @@
             position: absolute;
             width: 20px;
             height: 20px;
-            background: #333;
+            background: #ecf0f1;
             border-radius: 50%;
             left: -10px;
             bottom: -130px;
@@ -72,21 +75,45 @@
 
         /* Heading display */
         #heading-display {
-            margin-top: 30px;
-            font-size: 1.5em;
+            font-size: 2em;
             font-weight: bold;
-            background-color: #fff;
-            padding: 10px 20px;
+            background-color: #34495e;
+            padding: 10px 25px;
             border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            min-width: 80px;
         }
 
-        /* Message for devices without sensor support */
-        #no-sensor-message {
+        /* Button to start the compass */
+        #start-btn {
+            margin-top: 20px;
+            padding: 15px 30px;
+            font-size: 1em;
+            font-weight: bold;
+            color: #fff;
+            background-color: #2980b9;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            transition: background-color 0.3s, transform 0.1s;
+        }
+
+        #start-btn:hover {
+            background-color: #3498db;
+        }
+
+        #start-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* Message for errors or status */
+        #message-display {
             display: none;
             color: #e74c3c;
-            text-align: center;
-            padding: 20px;
+            margin-top: 20px;
+            padding: 10px;
+            max-width: 80%;
         }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
@@ -99,27 +126,67 @@
     </div>
 
     <div id="heading-display">--°</div>
-    <div id="no-sensor-message">
-        Your device does not support the required orientation sensors.
-    </div>
+    
+    <button id="start-btn">Start Compass</button>
+
+    <div id="message-display"></div>
 
     <script>
         // Get references to the DOM elements
         const arrow = document.getElementById('compass-arrow');
         const headingDisplay = document.getElementById('heading-display');
-        const noSensorMessage = document.getElementById('no-sensor-message');
+        const startBtn = document.getElementById('start-btn');
+        const messageDisplay = document.getElementById('message-display');
 
-        // Check if the DeviceOrientationEvent is supported
-        if (window.DeviceOrientationEvent) {
-            // Add an event listener for device orientation
-            window.addEventListener('deviceorientation', handleOrientation);
-        } else {
-            // Display a message if the API is not supported
-            document.getElementById('compass-container').style.display = 'none';
-            headingDisplay.style.display = 'none';
-            noSensorMessage.style.display = 'block';
-            console.error("DeviceOrientationEvent is not supported by your browser.");
+        /**
+         * Function to start listening for orientation events.
+         * This is now separated to be called after user interaction.
+         */
+        function startCompass() {
+            // Add the event listener for device orientation
+            window.addEventListener('deviceorientation', handleOrientation, true);
+            
+            // Hide the start button and any previous messages
+            startBtn.style.display = 'none';
+            messageDisplay.style.display = 'none';
         }
+
+        /**
+         * Handles the request for sensor permissions, required on iOS 13+ and other modern browsers.
+         */
+        function requestPermissionAndStart() {
+            // Check for the modern permission API
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            startCompass();
+                        } else {
+                            // User denied the permission
+                            messageDisplay.textContent = 'Permission to access orientation sensors was denied.';
+                            messageDisplay.style.display = 'block';
+                        }
+                    })
+                    .catch(error => {
+                        // Handle errors during the permission request
+                        messageDisplay.textContent = 'Error requesting sensor permission: ' + error.message;
+                        messageDisplay.style.display = 'block';
+                        console.error(error);
+                    });
+            } else {
+                // Handle devices that do not require explicit permission (e.g., many Android devices)
+                if ('DeviceOrientationEvent' in window) {
+                    startCompass();
+                } else {
+                    messageDisplay.textContent = 'Your device or browser does not support the required orientation sensors.';
+                    messageDisplay.style.display = 'block';
+                    startBtn.style.display = 'none';
+                }
+            }
+        }
+        
+        // Add click event listener to the start button
+        startBtn.addEventListener('click', requestPermissionAndStart);
 
         /**
          * Handles the device orientation event.
@@ -127,36 +194,44 @@
          */
         function handleOrientation(event) {
             // The 'alpha' property gives the direction the device is facing in degrees (0-360)
-            // 'webkitCompassHeading' is for iOS devices
+            // 'webkitCompassHeading' is a more direct value for compass heading on iOS devices
             const alpha = event.alpha;
             const webkitCompassHeading = event.webkitCompassHeading;
 
             let heading = 0;
 
-            if (webkitCompassHeading !== undefined && webkitCompassHeading !== null) {
-                // Use webkitCompassHeading if available (iOS)
-                heading = webkitCompassHeading;
-            } else if (alpha !== undefined && alpha !== null) {
-                // Use alpha, but it needs to be adjusted.
-                // The alpha value is 0 when the device points to North, but we need to rotate the compass
-                // in the opposite direction, so we use 360 - alpha.
-                heading = 360 - alpha;
+            // Use webkitCompassHeading if available (more reliable on iOS)
+            if (typeof webkitCompassHeading !== 'undefined' && webkitCompassHeading !== null) {
+                heading = -webkitCompassHeading; // Rotate the dial, not the arrow
+            } 
+            // Fallback to the alpha value
+            else if (typeof alpha !== 'undefined' && alpha !== null) {
+                heading = alpha;
             } else {
                  // Display a message if no heading data is available
-                noSensorMessage.textContent = 'Could not retrieve orientation data.';
-                noSensorMessage.style.display = 'block';
+                messageDisplay.textContent = 'Could not retrieve orientation data.';
+                messageDisplay.style.display = 'block';
                 return;
             }
 
-            // Rotate the arrow to point to North
-            // We apply a rotation transform to the arrow element.
+            // Rotate the arrow to point to North.
+            // We use the negative of the heading because we are rotating the arrow itself,
+            // not the entire compass. The arrow should point opposite to the device's rotation.
             if (arrow) {
                 arrow.style.transform = `rotate(${heading}deg)`;
             }
 
             // Update the heading display with the rounded value
+            // We calculate the actual heading for display (0° is North)
+            let displayHeading = 0;
+            if (typeof webkitCompassHeading !== 'undefined' && webkitCompassHeading !== null) {
+                displayHeading = webkitCompassHeading;
+            } else {
+                displayHeading = (360 - alpha) % 360;
+            }
+
             if (headingDisplay) {
-                headingDisplay.textContent = `${Math.round(heading)}°`;
+                headingDisplay.textContent = `${Math.round(displayHeading)}°`;
             }
         }
     </script>
