@@ -65,7 +65,7 @@
 </head>
 <body>
     <div id="info">
-        Welcome! Click "Enable Motion Control" to look around, or "Enter AR" to place objects.
+        An object is in front of you. Enable motion controls to find it, or enter AR.
     </div>
     <!-- Buttons will be added here by JS -->
 
@@ -124,6 +124,9 @@
             orientationControls = new DeviceOrientationControls(camera);
             orientationControls.enabled = false;
 
+            // --- Create the initial object ---
+            createInitialObject();
+
             setupButtons();
             
             reticle = new THREE.Mesh(
@@ -139,6 +142,23 @@
             scene.add(controller);
 
             window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function createInitialObject() {
+            // Use a more distinct shape for the initial object
+            const geometry = new THREE.IcosahedronGeometry(0.2, 0); 
+            const material = new THREE.MeshStandardMaterial({
+                color: 0xffd700, // Gold color
+                roughness: 0.3,
+                metalness: 0.8
+            });
+            const initialObject = new THREE.Mesh(geometry, material);
+            
+            // Position it 3 meters in front of the camera's starting point
+            initialObject.position.set(0, 0, -3); 
+            
+            scene.add(initialObject);
+            placedObjects.push(initialObject); // Add to the array to make it spin
         }
 
         function setupButtons() {
