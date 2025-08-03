@@ -1,280 +1,511 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>WebXR Hide and Seek</title>
+    <title>WebXR AR GPS Pins with a Dedicated UI</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
+            font-family: 'Inter', sans-serif;
             margin: 0;
-            padding: 0;
-            font-family: sans-serif;
-            /* The background is transparent to show the camera feed immediately */
-            background-color: transparent;
-            color: #fff;
+            overflow: hidden; /* Prevent scrolling */
         }
-        #ar-button {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 12px 24px;
-            border: 1px solid #fff;
-            border-radius: 4px;
-            background: rgba(0, 0, 0, 0.5);
-            color: #fff;
-            font-size: 16px;
-            cursor: pointer;
-            z-index: 100;
+        /* AR container now takes up the top 85% of the screen */
+        #ar-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 85%;
+            z-index: 1;
+            display: none; 
         }
-        #ar-button:disabled {
-            cursor: not-allowed;
-            opacity: 0.5;
+        #map-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
         }
-        #message {
-            position: absolute;
+        /* This is the info panel for the MAP VIEW */
+        #map-info-panel {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            z-index: 10;
+            max-width: 300px;
+            display: none; /* Hidden by default, controlled by JS */
+        }
+        #ar-button { display: none !important; }
+
+        #loading-indicator {
+            position: fixed; 
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
+            color: white;
             background-color: rgba(0, 0, 0, 0.8);
             padding: 20px;
             border-radius: 10px;
-            text-align: center;
-            display: none;
-            z-index: 100;
+            z-index: 99;
+            display: none; /* Hidden by default */
+            font-size: 1.2em;
         }
     </style>
 </head>
-<body>
-    <!-- The initial info panel has been removed -->
-    <button id="ar-button" disabled>Start AR</button>
-    <div id="message">
-        <h2>Object Found!</h2>
-        <p>You've successfully found the hidden object.</p>
-        <button id="reset-button">Play Again</button>
+<body class="bg-black text-white">
+
+    <!-- The AR view will be populated by Three.js -->
+    <div id="ar-container"></div>
+
+    <!-- The Map view is the default view -->
+    <div id="map-container">
+        <div id="map" class="w-full h-full"></div>
+        <button id="enter-ar-button" class="absolute bottom-10 left-1/2 -translate-x-1/2 z-10 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-full shadow-lg transition-transform transform hover:scale-105">
+            Go Inside AR
+        </button>
+        <button id="delete-all-pins-button" class="absolute top-4 right-4 z-10 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg">
+            Delete All Pins
+        </button>
+    </div>
+    
+    <div id="loading-indicator">Loading Pins...</div>
+    
+    <!-- Info panel specifically for the map view -->
+    <div id="map-info-panel">
+        <p id="map-status">Welcome! Loading map...</p>
+        <p id="map-coords">Lat/Lon: N/A</p>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script>
-        // Ensure ThreeJS is loaded before starting the app
-        if (typeof THREE === 'undefined') {
-            console.error('Error: Could not load three.js');
-        } else {
-            initializeApp();
-        }
+    <!-- NEW: Dedicated UI panel for the AR View -->
+    <div id="ar-ui-panel" class="fixed bottom-0 left-0 w-full h-[15%] bg-gray-900 text-white p-2 z-10 hidden flex items-center justify-around">
+        <div class="text-center">
+            <p class="text-xs sm:text-sm text-gray-400 uppercase">Status</p>
+            <p id="ar-status" class="text-sm sm:text-lg font-bold">Initializing...</p>
+        </div>
+        <div class="text-center">
+            <p class="text-xs sm:text-sm text-gray-400 uppercase">GPS Coords</p>
+            <p id="ar-coords" class="text-sm sm:text-lg font-bold">N/A</p>
+        </div>
+        <div class="text-center">
+            <p class="text-xs sm:text-sm text-gray-400 uppercase">Reticle Position</p>
+            <p id="ar-reticle-coords" class="text-sm sm:text-lg font-bold">X, Z: N/A</p>
+        </div>
+    </div>
 
-        function initializeApp() {
-            // The reference to the instructions panel has been removed
-            const arButton = document.getElementById('ar-button');
-            const message = document.getElementById('message');
-            const resetButton = document.getElementById('reset-button');
 
-            let xrSession = null;
-            let xrRefSpace = null;
-            let xrHitTestSource = null;
-
-            let gl = null;
-            let renderer = null;
-            let scene = null;
-            let camera = null;
-
-            let reticle = null;
-            let hiddenObject = null;
-            let placedObject = null;
-
-            let isHider = true; // Start as the hider
-
-            // Check for WebXR support
-            if (navigator.xr) {
-                navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-                    if (supported) {
-                        arButton.disabled = false;
-                        arButton.textContent = 'Start Hiding';
-                    }
-                });
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.148.0/examples/jsm/"
             }
-
-            // Start the AR session
-            arButton.addEventListener('click', () => {
-                if (xrSession === null) {
-                    // Request the AR session
-                    navigator.xr.requestSession('immersive-ar', {
-                        requiredFeatures: ['hit-test'],
-                        optionalFeatures: ['dom-overlay'],
-                        domOverlay: { root: document.body }
-                    }).then(onSessionStarted).catch(err => {
-                        // Handle session request errors
-                        console.error("Failed to start AR session", err);
-                    });
-                } else {
-                    // End the current session
-                    xrSession.end();
-                }
-            });
-
-            // Handle session start
-            async function onSessionStarted(session) {
-                xrSession = session;
-                arButton.textContent = 'Stop';
-
-                // Set up the WebGL context and renderer
-                const canvas = document.createElement('canvas');
-                gl = canvas.getContext('webgl', { xrCompatible: true });
-                renderer = new THREE.WebGLRenderer({
-                    canvas: canvas,
-                    context: gl,
-                    alpha: true,
-                    antialias: true,
-                    powerPreference: 'high-accuracy'
-                });
-                renderer.autoClear = false;
-
-                // Set up the scene and camera
-                scene = new THREE.Scene();
-                camera = new THREE.PerspectiveCamera();
-                camera.matrixAutoUpdate = false;
-
-                // Set the session on the renderer
-                await renderer.xr.setSession(xrSession);
-                xrRefSpace = await xrSession.requestReferenceSpace('local');
-
-                // Set up hit testing
-                const viewerSpace = await xrSession.requestReferenceSpace('viewer');
-                xrHitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
-
-                // Create the reticle (the marker for placing objects)
-                const reticleGeometry = new THREE.RingGeometry(0.05, 0.06, 32);
-                const reticleMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-                reticle = new THREE.Mesh(reticleGeometry, reticleMaterial);
-                reticle.matrixAutoUpdate = false;
-                reticle.visible = false;
-                scene.add(reticle);
-
-                // Create the object to be hidden
-                const objectGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
-                const objectMaterial = new THREE.MeshNormalMaterial();
-                hiddenObject = new THREE.Mesh(objectGeometry, objectMaterial);
-
-                // Start the render loop
-                xrSession.requestAnimationFrame(onXRFrame);
-
-                // Handle screen taps
-                xrSession.addEventListener('select', onSelect);
-
-                // Handle session end
-                xrSession.addEventListener('end', () => {
-                    xrSession = null;
-                    // Update button text and game state based on who's turn it is
-                    if (isHider) {
-                        arButton.textContent = 'Start Seeking';
-                        isHider = false;
-                    } else {
-                        arButton.textContent = 'Start Hiding';
-                        isHider = true;
-                    }
-                });
-            }
-
-            // Handle each frame of the AR session
-            function onXRFrame(time, frame) {
-                if (!xrSession) return;
-
-                const session = frame.session;
-                session.requestAnimationFrame(onXRFrame);
-
-                const pose = frame.getViewerPose(xrRefSpace);
-                if (pose) {
-                    // Update camera based on device movement
-                    renderer.xr.updateCamera(pose);
-                    
-                    // Show the reticle for the hider if a surface is detected
-                    if (isHider && xrHitTestSource) {
-                        const hitTestResults = frame.getHitTestResults(xrHitTestSource);
-                        if (hitTestResults.length > 0) {
-                            const hit = hitTestResults[0];
-                            const hitPose = hit.getPose(xrRefSpace);
-                            reticle.visible = true;
-                            reticle.matrix.fromArray(hitPose.transform.matrix);
-                        } else {
-                            reticle.visible = false;
-                        }
-                    }
-
-                    // Check if the seeker has found the object
-                    if (!isHider && placedObject) {
-                        const distance = camera.position.distanceTo(placedObject.position);
-                        if (distance < 0.5) { // Seeker is close enough
-                            message.style.display = 'block';
-                            xrSession.end();
-                        }
-                    }
-
-                    // Render the scene
-                    renderer.render(scene, camera);
-                }
-            }
-
-            // Handle screen taps for placing objects
-            function onSelect() {
-                if (isHider && reticle.visible) {
-                    // Place the object at the reticle's position
-                    placedObject = hiddenObject.clone();
-                    placedObject.position.setFromMatrixPosition(reticle.matrix);
-                    scene.add(placedObject);
-
-                    // Save the object's position and orientation to localStorage
-                    const position = placedObject.position;
-                    const quaternion = placedObject.quaternion;
-                    localStorage.setItem('hiddenObject', JSON.stringify({
-                        position: [position.x, position.y, position.z],
-                        quaternion: [quaternion.x, quaternion.y, quaternion.z, quaternion.w]
-                    }));
-
-                    // Hide the reticle after placing the object
-                    reticle.visible = false;
-                }
-            }
-            
-            // Load the hidden object for the seeker
-            function loadHiddenObject() {
-                const objectData = localStorage.getItem('hiddenObject');
-                if (objectData) {
-                    const data = JSON.parse(objectData);
-                    placedObject = hiddenObject.clone();
-                    placedObject.position.fromArray(data.position);
-                    placedObject.quaternion.fromArray(data.quaternion);
-                    scene.add(placedObject);
-                }
-            }
-
-            // Reset the game to play again
-            resetButton.addEventListener('click', () => {
-                localStorage.removeItem('hiddenObject');
-                message.style.display = 'none';
-                arButton.textContent = 'Start Hiding';
-                isHider = true;
-                if (placedObject) {
-                    scene.remove(placedObject);
-                }
-                placedObject = null;
-            });
-
-            // The seeker starts their turn
-            arButton.addEventListener('click', () => {
-                if (!isHider && xrSession === null) {
-                    navigator.xr.requestSession('immersive-ar', {
-                        requiredFeatures: ['hit-test'],
-                        optionalFeatures: ['dom-overlay'],
-                        domOverlay: { root: document.body }
-                    }).then(session => {
-                        onSessionStarted(session).then(() => {
-                            // Load the hidden object once the seeker's session starts
-                            loadHiddenObject();
-                        });
-                    });
-                }
-            });
         }
     </script>
+
+    <script type="module">
+        // Three.js Imports
+        import * as THREE from 'three';
+        import { ARButton } from 'three/addons/webxr/ARButton.js';
+
+        // --- GLOBAL VARIABLES ---
+        let camera, scene, renderer;
+        let controller;
+        let reticle;
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+
+        let googleMap;
+        let allPinData = [];
+        let arPinsInScene = [];
+        let arReady = false;
+
+        let deviceHeading = 0;
+
+        const mapInfoPanel = document.getElementById('map-info-panel');
+        const arUiPanel = document.getElementById('ar-ui-panel');
+        
+        // --- ACCURACY UPDATE: Variables for periodic pin position updates ---
+        let lastPinUpdateTime = 0;
+        const PIN_UPDATE_INTERVAL = 2000; // Recalculate every 2000ms (2 seconds)
+
+        // --- APPLICATION INITIALIZATION ---
+        window.initApp = () => {
+            mapInfoPanel.style.display = 'block';
+            
+            initMap();
+            watchGPS();
+            setupEnterARButton();
+            setupDeleteButton(); 
+            setupDeviceOrientation();
+        };
+
+        // --- MAP FUNCTIONS ---
+        function initMap() {
+            const initialLocation = { lat: 52.6638, lng: -8.6267 }; 
+            googleMap = new google.maps.Map(document.getElementById("map"), {
+                center: initialLocation,
+                zoom: 18,
+                mapTypeId: 'roadmap', 
+                disableDefaultUI: true,
+                gestureHandling: 'greedy'
+            });
+            updateStatus("Map initialized. Loading saved pins.");
+            loadPinsFromLocalStorage();
+        }
+
+        // --- UI SETUP ---
+        function setupEnterARButton() {
+            const enterARButton = document.getElementById('enter-ar-button');
+            enterARButton.addEventListener('click', () => {
+                // Hide map UI and show AR UI
+                document.getElementById('map-container').style.display = 'none';
+                mapInfoPanel.style.display = 'none';
+                document.getElementById('ar-container').style.display = 'block';
+                arUiPanel.style.display = 'flex';
+                
+                if (!arReady) {
+                    initAR();
+                    arReady = true;
+                }
+                
+                // ACCURACY UPDATE: We no longer place pins here. They will be placed
+                // and updated continuously by the render loop for maximum accuracy.
+                
+                document.getElementById('ar-button').click();
+            });
+        }
+        
+        function setupDeleteButton() {
+            const deleteButton = document.getElementById('delete-all-pins-button');
+            deleteButton.addEventListener('click', () => {
+                if (confirm("Are you sure you want to delete all saved pins? This cannot be undone.")) {
+                    deleteAllPins();
+                }
+            });
+        }
+
+        // --- AR & SENSOR INITIALIZATION ---
+        function setupDeviceOrientation() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        } else {
+                            updateStatus("Permission for device orientation not granted.");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
+        }
+
+        function handleOrientation(event) {
+            const heading = event.webkitCompassHeading || event.alpha;
+            if (heading !== null) {
+                deviceHeading = heading;
+            }
+        }
+
+        function initAR() {
+            const arContainer = document.getElementById('ar-container');
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, arContainer.clientWidth / arContainer.clientHeight, 0.01, 40);
+
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
+            light.position.set(0.5, 1, 0.25);
+            scene.add(light);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(arContainer.clientWidth, arContainer.clientHeight);
+            renderer.xr.enabled = true;
+            arContainer.appendChild(renderer.domElement);
+
+            const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
+            document.body.appendChild(arButton);
+
+            reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0x4A90E2 })
+            );
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+
+            controller = renderer.xr.getController(0);
+            controller.addEventListener('select', onSelect);
+            scene.add(controller);
+
+            window.addEventListener('resize', onWindowResize);
+            renderer.setAnimationLoop(render);
+        }
+
+        // --- LOCAL STORAGE & PIN MANAGEMENT ---
+        function savePinsToLocalStorage() {
+            localStorage.setItem('ar_gps_pins', JSON.stringify(allPinData));
+            updateStatus(`${allPinData.length} pins saved.`);
+        }
+
+        function loadPinsFromLocalStorage() {
+            const savedPinsJSON = localStorage.getItem('ar_gps_pins');
+            if (savedPinsJSON) {
+                allPinData = JSON.parse(savedPinsJSON);
+                updateStatus(`Loaded ${allPinData.length} pins.`);
+                allPinData.forEach(pinData => placeMarkerOnMap(pinData));
+            } else {
+                updateStatus("No pins found. Place a new one in AR!");
+            }
+        }
+        
+        function deleteAllPins() {
+            allPinData = [];
+            localStorage.removeItem('ar_gps_pins');
+            updateStatus("All pins have been deleted.");
+            location.reload();
+        }
+
+        // --- CORE AR + GPS LOGIC ---
+        
+        // ACCURACY UPDATE: This new function is the heart of the accuracy engine.
+        // It's called periodically by the render loop.
+        function updateAllPinPositionsInAR() {
+            updateStatus("Re-calibrating pin positions...");
+            navigator.geolocation.getCurrentPosition(position => {
+                const userLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+                
+                updateStatus(`Location updated. Re-placing ${allPinData.length} pins.`);
+
+                allPinData.forEach(pinData => {
+                    const pinLocation = new google.maps.LatLng(pinData.lat, pinData.lon);
+
+                    const distance = google.maps.geometry.spherical.computeDistanceBetween(userLocation, pinLocation);
+                    const pinHeading = google.maps.geometry.spherical.computeHeading(userLocation, pinLocation);
+                    
+                    const relativeHeading = pinHeading - deviceHeading;
+                    
+                    const x = distance * Math.sin(relativeHeading * Math.PI / 180);
+                    const z = -distance * Math.cos(relativeHeading * Math.PI / 180);
+
+                    // We calculate the final position, including the Y-offset.
+                    const newPosition = new THREE.Vector3(x, 0.2, z);
+
+                    // Check if a 3D model for this pin already exists in the scene
+                    let existingPin = arPinsInScene.find(p => p.userData.id === pinData.id);
+
+                    if (existingPin) {
+                        // If it exists, update its position directly for maximum accuracy.
+                        existingPin.position.copy(newPosition);
+                    } else {
+                        // If it's a new pin that hasn't been rendered yet, create it.
+                        placePinInScene(newPosition, pinData, false);
+                    }
+                });
+
+            }, (error) => {
+                console.error("GPS Error during re-calibration:", error);
+                updateStatus(`Could not re-calibrate: ${error.message}`);
+            }, { enableHighAccuracy: true });
+        }
+
+
+        function onSelect() {
+            if (reticle.visible) {
+                updateStatus("Getting precise location to save new pin...");
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const { latitude, longitude, altitude } = position.coords;
+                    const pinData = {
+                        lat: latitude,
+                        lon: longitude,
+                        alt: altitude || 0,
+                        id: `pin_${Date.now()}`,
+                        createdAt: Date.now()
+                    };
+                    
+                    allPinData.push(pinData);
+                    savePinsToLocalStorage();
+
+                    const pinPosition = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+                    pinPosition.y += 0.2; // Add offset for new pins
+                    placePinInScene(pinPosition, pinData, true); 
+                    placeMarkerOnMap(pinData);
+
+                }, (error) => {
+                    console.error("GPS Error:", error);
+                    updateStatus(`Error getting location: ${error.message}`);
+                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+            }
+        }
+
+        function placePinInScene(position, data, isNew) {
+            // Avoid placing duplicate pins in the AR scene
+            if (arPinsInScene.some(p => p.userData.id === data.id)) return;
+
+            const geometry = new THREE.CylinderGeometry(0.01, 0.08, 0.4, 32);
+            const material = new THREE.MeshStandardMaterial({
+                color: isNew ? 0xff3366 : 0xffff00,
+                metalness: 0.4,
+                roughness: 0.6
+            });
+            const pin = new THREE.Mesh(geometry, material);
+            
+            // The position is now set directly from the calculated value.
+            pin.position.copy(position);
+            
+            pin.userData = data; 
+            scene.add(pin);
+            arPinsInScene.push(pin);
+        }
+
+        function placeMarkerOnMap(data) {
+            if (!googleMap) return;
+
+            const starIcon = {
+                path: 'M 12,2.5 L 14.3,7.7 L 20,8.5 L 16,12.3 L 17,18 L 12,15.2 L 7,18 L 8,12.3 L 4,8.5 L 9.7,7.7 Z',
+                fillColor: '#FFD700',
+                fillOpacity: 1,
+                strokeWeight: 0,
+                rotation: 0,
+                scale: 1.5,
+                anchor: new google.maps.Point(12, 12)
+            };
+
+            new google.maps.Marker({
+                position: { lat: data.lat, lng: data.lon },
+                map: googleMap,
+                icon: starIcon,
+                title: `Pin placed at ${new Date(data.createdAt).toLocaleString()}`,
+                animation: google.maps.Animation.DROP,
+            });
+        }
+
+        // --- GEOLOCATION ---
+        function watchGPS() {
+            if (!navigator.geolocation) {
+                updateStatus("Geolocation is not supported by your browser.");
+                return;
+            }
+            navigator.geolocation.watchPosition(
+                (position) => {
+                    const { latitude, longitude } = position.coords;
+                    const coordsText = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+                    document.getElementById('map-coords').textContent = `Lat/Lon: ${coordsText}`;
+                    document.getElementById('ar-coords').textContent = coordsText;
+
+                    if (googleMap && !renderer?.xr.isPresenting) {
+                        googleMap.setCenter({ lat: latitude, lng: longitude });
+                    }
+                },
+                () => { updateStatus("Unable to retrieve your location."); },
+                { enableHighAccuracy: true }
+            );
+        }
+
+        // --- UTILITY & EVENT HANDLERS ---
+        function onWindowResize() {
+            if (arReady) {
+                const arContainer = document.getElementById('ar-container');
+                camera.aspect = arContainer.clientWidth / arContainer.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(arContainer.clientWidth, arContainer.clientHeight);
+            }
+        }
+
+        function updateStatus(message) {
+            console.log(message);
+            // Update both panels if they exist
+            const mapStatus = document.getElementById('map-status');
+            const arStatus = document.getElementById('ar-status');
+            if(mapStatus) mapStatus.textContent = message;
+            if(arStatus) arStatus.textContent = message;
+        }
+
+        // --- RENDER LOOP ---
+        function render(timestamp, frame) {
+            if (!renderer) return; 
+
+            if (renderer.xr.isPresenting && frame) {
+                
+                // --- ACCURACY UPDATE: Periodically re-calculate all pin positions ---
+                if (timestamp - lastPinUpdateTime > PIN_UPDATE_INTERVAL) {
+                    lastPinUpdateTime = timestamp;
+                    updateAllPinPositionsInAR(); 
+                }
+
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+
+                if (!hitTestSourceRequested) {
+                    session.requestReferenceSpace('viewer').then((refSpace) => {
+                        session.requestHitTestSource({ space: refSpace }).then((source) => {
+                            hitTestSource = source;
+                        });
+                    });
+                    session.addEventListener('end', () => {
+                        hitTestSourceRequested = false;
+                        hitTestSource = null;
+
+                        arPinsInScene.forEach(pin => scene.remove(pin));
+                        arPinsInScene = [];
+
+                        // Switch back to map view
+                        document.getElementById('ar-container').style.display = 'none';
+                        arUiPanel.style.display = 'none';
+                        document.getElementById('map-container').style.display = 'block';
+                        mapInfoPanel.style.display = 'block';
+                        
+                        if (allPinData.length > 0) {
+                            const lastPin = allPinData[allPinData.length - 1];
+                            googleMap.setCenter({ lat: lastPin.lat, lng: lastPin.lon });
+                            googleMap.setZoom(20);
+                        }
+                        updateStatus("Exited AR. View pins on map.");
+                    });
+                    hitTestSourceRequested = true;
+                }
+
+                if (hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    const reticleCoordsEl = document.getElementById('ar-reticle-coords');
+
+                    if (hitTestResults.length) {
+                        const hit = hitTestResults[0];
+                        reticle.visible = true;
+                        reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+
+                        const reticlePosition = new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+                        reticleCoordsEl.textContent = `X: ${reticlePosition.x.toFixed(2)}, Z: ${reticlePosition.z.toFixed(2)}`;
+
+                    } else {
+                        reticle.visible = false;
+                        reticleCoordsEl.textContent = 'N/A';
+                    }
+                }
+            }
+
+            if (arReady) {
+                arPinsInScene.forEach(pin => {
+                    pin.rotation.y += 0.01; 
+                });
+                renderer.render(scene, camera);
+            }
+        }
+    </script>
+
+    <!-- IMPORTANT: Replace YOUR_API_KEY with your actual Google Maps API key -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDKFpUFxl8pfNSbx0GlQhmvFaHePoBxhKs&callback=initApp&libraries=geometry" defer></script>
+
 </body>
 </html>
