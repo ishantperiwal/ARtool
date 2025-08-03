@@ -33,19 +33,29 @@
             margin-bottom: 20px;
         }
         
-        /* The compass dial */
+        /* The compass dial is now just a background circle */
         #compass-dial {
             width: 100%;
             height: 100%;
             position: absolute;
             top: 0;
             left: 0;
-            background-image: url('https://i.imgur.com/7gHbbjN.png'); /* A simple compass rose image */
-            background-size: contain;
-            background-repeat: no-repeat;
-            background-position: center;
-            filter: invert(1); /* Make the dial white for dark mode */
+            border-radius: 50%;
         }
+
+        /* Styling for the N, E, S, W markers */
+        .cardinal-direction {
+            position: absolute;
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #ecf0f1;
+            transform: translate(-50%, -50%); /* Center the letters */
+        }
+        .north { top: 20px; left: 50%; }
+        .south { bottom: 5px; left: 50%; }
+        .east { top: 50%; right: 5px; }
+        .west { top: 50%; left: 25px; }
+
 
         /* The compass needle/arrow */
         #compass-arrow {
@@ -121,6 +131,12 @@
 <body>
 
     <div id="compass-container">
+        <!-- Cardinal direction markers -->
+        <div class="cardinal-direction north">N</div>
+        <div class="cardinal-direction east">E</div>
+        <div class="cardinal-direction south">S</div>
+        <div class="cardinal-direction west">W</div>
+
         <div id="compass-dial"></div>
         <div id="compass-arrow"></div>
     </div>
@@ -140,13 +156,9 @@
 
         /**
          * Function to start listening for orientation events.
-         * This is now separated to be called after user interaction.
          */
         function startCompass() {
-            // Add the event listener for device orientation
             window.addEventListener('deviceorientation', handleOrientation, true);
-            
-            // Hide the start button and any previous messages
             startBtn.style.display = 'none';
             messageDisplay.style.display = 'none';
         }
@@ -155,26 +167,22 @@
          * Handles the request for sensor permissions, required on iOS 13+ and other modern browsers.
          */
         function requestPermissionAndStart() {
-            // Check for the modern permission API
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
                         if (permissionState === 'granted') {
                             startCompass();
                         } else {
-                            // User denied the permission
                             messageDisplay.textContent = 'Permission to access orientation sensors was denied.';
                             messageDisplay.style.display = 'block';
                         }
                     })
                     .catch(error => {
-                        // Handle errors during the permission request
                         messageDisplay.textContent = 'Error requesting sensor permission: ' + error.message;
                         messageDisplay.style.display = 'block';
                         console.error(error);
                     });
             } else {
-                // Handle devices that do not require explicit permission (e.g., many Android devices)
                 if ('DeviceOrientationEvent' in window) {
                     startCompass();
                 } else {
@@ -185,7 +193,6 @@
             }
         }
         
-        // Add click event listener to the start button
         startBtn.addEventListener('click', requestPermissionAndStart);
 
         /**
@@ -193,8 +200,6 @@
          * @param {DeviceOrientationEvent} event - The orientation event object.
          */
         function handleOrientation(event) {
-            // The 'alpha' property gives the direction the device is facing in degrees (0-360)
-            // 'webkitCompassHeading' is a more direct value for compass heading on iOS devices
             const alpha = event.alpha;
             const webkitCompassHeading = event.webkitCompassHeading;
 
@@ -202,27 +207,24 @@
 
             // Use webkitCompassHeading if available (more reliable on iOS)
             if (typeof webkitCompassHeading !== 'undefined' && webkitCompassHeading !== null) {
-                heading = -webkitCompassHeading; // Rotate the dial, not the arrow
+                heading = -webkitCompassHeading;
             } 
-            // Fallback to the alpha value
+            // Fallback to the alpha value for other devices (e.g., Android)
             else if (typeof alpha !== 'undefined' && alpha !== null) {
-                heading = alpha;
+                // *** FIX: Rotate in the opposite direction of the device's turn ***
+                heading = -alpha;
             } else {
-                 // Display a message if no heading data is available
                 messageDisplay.textContent = 'Could not retrieve orientation data.';
                 messageDisplay.style.display = 'block';
                 return;
             }
 
             // Rotate the arrow to point to North.
-            // We use the negative of the heading because we are rotating the arrow itself,
-            // not the entire compass. The arrow should point opposite to the device's rotation.
             if (arrow) {
                 arrow.style.transform = `rotate(${heading}deg)`;
             }
 
             // Update the heading display with the rounded value
-            // We calculate the actual heading for display (0° is North)
             let displayHeading = 0;
             if (typeof webkitCompassHeading !== 'undefined' && webkitCompassHeading !== null) {
                 displayHeading = webkitCompassHeading;
