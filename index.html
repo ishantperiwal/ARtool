@@ -16,19 +16,27 @@
         .compass-rose, .direction-arrow {
             transition: transform 0.2s linear;
         }
+        .progress-bar-inner {
+            transition: width 0.2s ease-out;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen overflow-hidden p-4">
 
-    <!-- Permission & Calibration Overlays (will be hidden after setup) -->
+    <!-- Permission Overlay -->
     <div id="permission-overlay" class="absolute inset-0 bg-gray-900 bg-opacity-95 flex flex-col items-center justify-center z-30 text-center p-4">
         <h1 class="text-3xl font-bold mb-2">AR Pin Finder</h1>
         <p class="text-gray-400 mb-6">Please grant permission to access device sensors and location.</p>
         <button id="permission-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg">Enable</button>
     </div>
+    
+    <!-- Calibration Overlay -->
     <div id="calibration-overlay" class="hidden absolute inset-0 bg-gray-900 flex-col items-center justify-center z-20 text-center p-4">
         <h2 class="text-2xl font-bold mb-2">Calibrating...</h2>
         <p class="text-gray-400 mb-6">Move your device in a figure-8 pattern for accuracy.</p>
+        <div class="w-64 bg-gray-700 rounded-full h-4">
+            <div id="progress-bar" class="bg-green-500 h-4 rounded-full progress-bar-inner" style="width: 0%"></div>
+        </div>
     </div>
 
     <!-- Main UI -->
@@ -39,7 +47,6 @@
             <div class="absolute inset-0 border-4 border-gray-700 rounded-full"></div>
             <svg class="compass-rose w-full h-full" viewBox="0 0 200 200"><circle cx="100" cy="100" r="95" fill="#1F2937" stroke="#4B5563" stroke-width="1"/><text x="100" y="25" font-size="20" font-weight="bold" fill="#E53E3E" text-anchor="middle">N</text><text x="100" y="185" font-size="18" fill="white" text-anchor="middle">S</text><text x="15" y="105" font-size="18" fill="white" text-anchor="middle">W</text><text x="185" y="105" font-size="18" fill="white" text-anchor="middle">E</text></svg>
             <div class="absolute inset-0 flex items-center justify-center">
-                 <!-- This arrow will point towards the saved pin -->
                 <svg id="direction-arrow" class="w-1/2 h-1/2 direction-arrow" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M50 0L68.3013 37.5H31.6987L50 0Z" fill="#34D399"/><rect x="45" y="35" width="10" height="65" rx="5" fill="#34D399"/></svg>
             </div>
         </div>
@@ -72,6 +79,7 @@
             const permissionButton = document.getElementById('permission-button');
             const permissionOverlay = document.getElementById('permission-overlay');
             const calibrationOverlay = document.getElementById('calibration-overlay');
+            const progressBar = document.getElementById('progress-bar');
             const mainUI = document.getElementById('main-ui');
             const compassRose = document.querySelector('.compass-rose');
             const directionArrow = document.getElementById('direction-arrow');
@@ -86,25 +94,34 @@
             const clearPinButton = document.getElementById('clear-pin-button');
             const errorMessage = document.getElementById('error-message');
 
-            // State
+            // State & Settings
             let currentCoords = null;
             let currentHeading = 0;
             let savedPin = null;
             const AR_RADIUS = 20; // meters
+            const ROTATION_THRESHOLD = 720; 
+            let totalRotation = 0;
+            let lastMotionTimestamp = 0;
 
             // --- Utility Functions ---
-            function showError(message) { /* ... same as before ... */ }
-            function getDirection(heading) { /* ... same as before ... */ }
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorMessage.classList.remove('hidden');
+                setTimeout(() => errorMessage.classList.add('hidden'), 5000);
+            }
+
+            function getDirection(heading) {
+                const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                return directions[Math.round(heading / 45) % 8];
+            }
 
             function calculateDistance(lat1, lon1, lat2, lon2) {
                 const R = 6371e3; // metres
-                const φ1 = lat1 * Math.PI / 180;
-                const φ2 = lat2 * Math.PI / 180;
-                const Δφ = (lat2 - lat1) * Math.PI / 180;
-                const Δλ = (lon2 - lon1) * Math.PI / 180;
+                const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+                const Δφ = (lat2 - lat1) * Math.PI / 180, Δλ = (lon2 - lon1) * Math.PI / 180;
                 const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
                 const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                return R * c; // in metres
+                return R * c;
             }
 
             function calculateBearing(lat1, lon1, lat2, lon2) {
@@ -113,7 +130,7 @@
                 const y = Math.sin(λ2 - λ1) * Math.cos(φ2);
                 const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
                 const θ = Math.atan2(y, x);
-                return (θ * 180 / Math.PI + 360) % 360; // in degrees
+                return (θ * 180 / Math.PI + 360) % 360;
             }
 
             // --- UI Update Functions ---
@@ -133,15 +150,10 @@
                     distanceValue.textContent = Math.round(distance);
                     bearingDirection.textContent = getDirection(bearing);
                     
-                    // The arrow points towards the pin, relative to the phone's orientation
                     const arrowRotation = bearing - currentHeading;
                     directionArrow.style.transform = `rotate(${arrowRotation}deg)`;
 
-                    if (distance <= AR_RADIUS) {
-                        arButton.classList.remove('hidden');
-                    } else {
-                        arButton.classList.add('hidden');
-                    }
+                    arButton.classList.toggle('hidden', distance > AR_RADIUS);
                 } else {
                     finderInfo.classList.add('hidden');
                     arButton.classList.add('hidden');
@@ -159,6 +171,80 @@
             }
 
             // --- Event Handlers ---
+            placePinButton.addEventListener('click', () => { /* ... same as before ... */ });
+            clearPinButton.addEventListener('click', () => { /* ... same as before ... */ });
+            arButton.addEventListener('click', () => { alert("AR Session would launch here! The pin is nearby."); });
+
+            // --- Initialization Logic ---
+            function onCalibrationComplete() {
+                window.removeEventListener('devicemotion', handleMotion);
+                calibrationOverlay.classList.add('hidden');
+                mainUI.classList.remove('hidden');
+                mainUI.classList.add('flex');
+                
+                startCompass();
+                startGeolocation();
+                loadPin();
+            }
+
+            function handleMotion(event) {
+                const now = performance.now();
+                if (lastMotionTimestamp === 0) { lastMotionTimestamp = now; return; }
+                const deltaTime = (now - lastMotionTimestamp) / 1000;
+                lastMotionTimestamp = now;
+
+                if (event.rotationRate) {
+                    const { alpha, beta, gamma } = event.rotationRate;
+                    const magnitude = Math.sqrt(alpha*alpha + beta*beta + gamma*gamma);
+                    if (magnitude > 1) totalRotation += magnitude * deltaTime;
+                }
+                
+                const progress = Math.min(100, (totalRotation / ROTATION_THRESHOLD) * 100);
+                progressBar.style.width = `${progress}%`;
+
+                if (totalRotation >= ROTATION_THRESHOLD) onCalibrationComplete();
+            }
+
+            function startCalibration() {
+                permissionOverlay.classList.add('hidden');
+                calibrationOverlay.classList.remove('hidden');
+                calibrationOverlay.classList.add('flex');
+                lastMotionTimestamp = 0;
+                totalRotation = 0;
+
+                if ('DeviceMotionEvent' in window) {
+                    window.addEventListener('devicemotion', handleMotion);
+                } else {
+                    showError("Motion sensor not found. Skipping calibration.");
+                    onCalibrationComplete();
+                }
+            }
+
+            function startCompass() { /* ... same as before, calls updateUI() ... */ }
+            function startGeolocation() { /* ... same as before, calls updateUI() ... */ }
+
+            permissionButton.addEventListener('click', () => {
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission().then(orientationState => {
+                        if (orientationState !== 'granted') {
+                            showError('Orientation sensor permission denied.');
+                            return;
+                        }
+                        if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                            DeviceMotionEvent.requestPermission().then(motionState => {
+                                if (motionState === 'granted') startCalibration();
+                                else showError('Motion sensor permission denied.');
+                            }).catch(err => showError('Error requesting motion permission.'));
+                        } else {
+                            startCalibration();
+                        }
+                    }).catch(err => showError('Error requesting orientation permission.'));
+                } else {
+                    startCalibration();
+                }
+            });
+
+            // Re-add hidden handlers for brevity
             placePinButton.addEventListener('click', () => {
                 if (currentCoords) {
                     savedPin = { latitude: currentCoords.latitude, longitude: currentCoords.longitude };
@@ -169,7 +255,6 @@
                     showError("Could not get your current location to place pin.");
                 }
             });
-
             clearPinButton.addEventListener('click', () => {
                 savedPin = null;
                 localStorage.removeItem('arPinLocation');
@@ -178,48 +263,30 @@
                 clearPinButton.classList.add('hidden');
                 updateUI();
             });
-            
-            arButton.addEventListener('click', () => {
-                alert("AR Session would launch here! The pin is nearby.");
-                // In a real app, this would initiate the WebXR session.
-            });
-
-
-            // --- Initialization Logic ---
-            function onReady() {
-                permissionOverlay.classList.add('hidden');
-                calibrationOverlay.classList.add('hidden');
-                mainUI.classList.remove('hidden');
-                mainUI.classList.add('flex');
-                
-                startCompass();
-                startGeolocation();
-                loadPin();
-            }
-
-            function startCompass() { /* ... same as before, but calls updateCompass(heading) ... */ 
+            function startCompass() {
                 const orientationHandler = (event) => {
                     let heading = null;
                     if (event.webkitCompassHeading !== undefined) { heading = event.webkitCompassHeading; }
                     else if (event.absolute === true && event.alpha !== null) { heading = 360 - event.alpha; }
-                    
-                    if (heading !== null) {
-                        currentHeading = heading;
-                        updateUI();
-                    }
+                    if (heading !== null) { currentHeading = heading; updateUI(); }
                 };
                  if ('AbsoluteOrientationSensor' in window) {
-                    const sensor = new AbsoluteOrientationSensor({ frequency: 60 });
-                    sensor.addEventListener('reading', () => {
-                        const q = sensor.quaternion;
-                        let yawRad = Math.atan2(2 * (q[0] * q[1] + q[2] * q[3]), 1 - 2 * (q[1] * q[1] + q[2] * q[2]));
-                        let heading = yawRad * (180 / Math.PI);
-                        if (heading < 0) heading += 360;
-                        currentHeading = 360 - heading;
-                        if (currentHeading >= 360) currentHeading -= 360;
-                        updateUI();
-                    });
-                    sensor.start();
+                    try {
+                        const sensor = new AbsoluteOrientationSensor({ frequency: 60 });
+                        sensor.addEventListener('reading', () => {
+                            const q = sensor.quaternion;
+                            let yawRad = Math.atan2(2 * (q[0] * q[1] + q[2] * q[3]), 1 - 2 * (q[1] * q[1] + q[2] * q[2]));
+                            let heading = yawRad * (180 / Math.PI);
+                            if (heading < 0) heading += 360;
+                            currentHeading = 360 - heading;
+                            if (currentHeading >= 360) currentHeading -= 360;
+                            updateUI();
+                        });
+                        sensor.start();
+                    } catch(e) {
+                        if ('ondeviceorientationabsolute' in window) window.addEventListener('deviceorientationabsolute', orientationHandler);
+                        else if ('ondeviceorientation' in window) window.addEventListener('deviceorientation', orientationHandler);
+                    }
                 } else if ('ondeviceorientationabsolute' in window) {
                     window.addEventListener('deviceorientationabsolute', orientationHandler);
                 } else if ('ondeviceorientation' in window) {
@@ -228,15 +295,11 @@
                     showError('Compass functionality is not supported.');
                 }
             }
-
-            function startGeolocation() { /* ... same as before, but sets currentCoords and calls updateUI() ... */
+            function startGeolocation() {
                 if ('geolocation' in navigator) {
                     navigator.geolocation.watchPosition(
                         (position) => {
-                            currentCoords = {
-                                latitude: position.coords.latitude,
-                                longitude: position.coords.longitude
-                            };
+                            currentCoords = { latitude: position.coords.latitude, longitude: position.coords.longitude };
                             updateUI();
                         },
                         (error) => { showError("Could not get location."); },
@@ -246,21 +309,6 @@
                     showError("Geolocation is not supported.");
                 }
             }
-
-            permissionButton.addEventListener('click', () => {
-                // Simplified permission flow for this example
-                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    DeviceOrientationEvent.requestPermission().then(state => {
-                        if (state === 'granted') {
-                            onReady();
-                        } else {
-                            showError('Sensor permission denied.');
-                        }
-                    });
-                } else {
-                    onReady();
-                }
-            });
         });
     </script>
 </body>
