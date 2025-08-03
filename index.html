@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>WebXR Object Placement</title>
+    <title>WebXR Persistent Object Placement</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
@@ -13,7 +13,7 @@
             color: #fff;
             overflow: hidden; /* Hide scrollbars */
         }
-        #ar-button {
+        .xr-button {
             position: absolute;
             bottom: 20px;
             left: 50%;
@@ -24,6 +24,20 @@
             background: rgba(0, 0, 0, 0.5);
             color: white;
             font-size: 16px;
+            cursor: pointer;
+            z-index: 10;
+        }
+        #clear-button {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            border: 1px solid #ff9999;
+            border-radius: 8px;
+            background: rgba(255, 0, 0, 0.4);
+            color: white;
+            font-size: 14px;
             cursor: pointer;
             z-index: 10;
         }
@@ -45,8 +59,9 @@
 </head>
 <body>
     <div id="info">
-        Point your camera at a surface and tap to place a cube.
+        Point camera at a surface and tap to place a persistent cube.
     </div>
+    <button id="clear-button">Clear Anchors</button>
 
     <!-- This script tag is for three.js, the 3D library -->
     <script type="importmap">
@@ -63,49 +78,61 @@
         import * as THREE from 'three';
         import { ARButton } from 'three/addons/webxr/ARButton.js';
 
+        const ANCHORS_KEY = 'webxr-persistent-anchors-v1';
+
         let camera, scene, renderer;
         let controller;
         let reticle; // This will be our placement marker
 
+        // --- State for persistence ---
+        // A Map to link XRAnchor objects to our three.js objects
+        const placedObjects = new Map();
+        // A Set to hold the UUIDs of anchors we have saved
+        let savedAnchorUUIDs = new Set();
+        // A flag to trigger anchor creation in the render loop
+        let placementRequested = false;
+
+        init();
+        animate();
+
         // This function sets up the entire scene
         function init() {
-            // Create a new scene
             scene = new THREE.Scene();
-
-            // Create a camera. The fov, aspect, near, and far values will be
-            // updated automatically by the WebXR session.
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-            // Add lighting to the scene
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
-            // Set up the WebGL renderer
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
-            // Enable WebXR support
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // Create the AR button and add it to the page
+            // --- AR Button Setup ---
+            // We now request 'anchors' and 'hit-test' features
             const arButton = ARButton.createButton(renderer, {
-                requiredFeatures: ['hit-test'] // We need hit-testing to find surfaces
+                requiredFeatures: ['hit-test', 'anchors']
             });
+            arButton.classList.add('xr-button');
             document.body.appendChild(arButton);
-            arButton.style.bottom = '20px';
-            arButton.style.left = '50%';
-            arButton.style.transform = 'translateX(-50%)';
-            arButton.style.padding = '12px 24px';
-            arButton.style.border = '1px solid #fff';
-            arButton.style.borderRadius = '8px';
-            arButton.style.background = 'rgba(0, 0, 0, 0.5)';
-            arButton.style.color = 'white';
-            arButton.style.fontSize = '16px';
-            arButton.style.cursor = 'pointer';
-            arButton.style.zIndex = '10';
 
+            // --- Clear Anchors Button ---
+            document.getElementById('clear-button').addEventListener('click', () => {
+                if (confirm('Are you sure you want to clear all placed objects?')) {
+                    localStorage.removeItem(ANCHORS_KEY);
+                    // Reload to apply changes and clear the scene
+                    window.location.reload();
+                }
+            });
+
+            // Load saved anchor UUIDs from localStorage
+            const savedUUIDsRaw = localStorage.getItem(ANCHORS_KEY);
+            if (savedUUIDsRaw) {
+                savedAnchorUUIDs = new Set(JSON.parse(savedUUIDsRaw));
+                console.log('Restored anchor UUIDs from previous session:', savedAnchorUUIDs);
+            }
 
             // --- Controller Setup ---
             controller = renderer.xr.getController(0);
@@ -113,50 +140,60 @@
             scene.add(controller);
 
             // --- Reticle (Placement Marker) Setup ---
-            // This is a ring that shows where we are aiming
             reticle = new THREE.Mesh(
                 new THREE.RingGeometry(0.05, 0.07, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial()
             );
-            // The reticle is not visible until we find a surface
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
 
-            // Handle window resizing
             window.addEventListener('resize', onWindowResize);
         }
 
         // This function is called when the user taps the screen
         function onSelect() {
-            // This only runs if the reticle is visible (meaning we've found a surface)
+            // If the reticle is visible, it means we've found a surface.
+            // We set a flag to request placing an object in the render loop.
             if (reticle.visible) {
-                // Create a colorful cube
-                const material = new THREE.MeshStandardMaterial({
-                    color: 0xffffff * Math.random(), // Random color
-                    roughness: 0.7,
-                    metalness: 0.0
-                });
-                const mesh = new THREE.Mesh(
-                    new THREE.BoxGeometry(0.1, 0.1, 0.1),
-                    material
-                );
-
-                // Position the cube where the reticle is
-                mesh.position.setFromMatrixPosition(reticle.matrix);
-                mesh.scale.y = Math.random() * 2 + 1; // Give it a random height
-                scene.add(mesh);
+                placementRequested = true;
             }
         }
 
-        // Handle window resizing
+        // Creates a cube and adds it to our tracking map
+        function placeObject(anchor) {
+            const material = new THREE.MeshStandardMaterial({
+                color: 0xffffff * Math.random(), // Random color
+                roughness: 0.7,
+                metalness: 0.0
+            });
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.1, 0.1, 0.1),
+                material
+            );
+            // The anchor will control the object's position, so disable matrix auto-update
+            mesh.matrixAutoUpdate = false;
+            // Store the anchor and its mesh
+            placedObjects.set(anchor, mesh);
+            scene.add(mesh);
+        }
+
+        // Saves all current anchor UUIDs to localStorage
+        function saveAnchors() {
+            const uuids = [];
+            for (const anchor of placedObjects.keys()) {
+                uuids.push(anchor.anchorUUID);
+            }
+            localStorage.setItem(ANCHORS_KEY, JSON.stringify(uuids));
+            console.log('Saved anchors to localStorage:', uuids);
+        }
+
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // The animation loop
         let hitTestSource = null;
         let hitTestSourceRequested = false;
 
@@ -170,45 +207,72 @@
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
-                // Request hit test source once
+                // --- Hit Test Logic (to position the reticle) ---
                 if (hitTestSourceRequested === false) {
-                    session.requestReferenceSpace('viewer').then(function (referenceSpace) {
-                        session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
+                    session.requestReferenceSpace('viewer').then(referenceSpace => {
+                        session.requestHitTestSource({ space: referenceSpace }).then(source => {
                             hitTestSource = source;
                         });
                     });
-
-                    session.addEventListener('end', function () {
+                    session.addEventListener('end', () => {
                         hitTestSourceRequested = false;
                         hitTestSource = null;
                     });
-
                     hitTestSourceRequested = true;
                 }
 
-                // Get hit test results
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
                     if (hitTestResults.length) {
                         const hit = hitTestResults[0];
-                        // If we have a hit, make the reticle visible and place it at the hit point
                         reticle.visible = true;
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
                     } else {
-                        // If no hit, hide the reticle
                         reticle.visible = false;
                     }
                 }
-            }
 
-            // Render the scene
+                // --- Anchor Creation Logic ---
+                if (placementRequested) {
+                    placementRequested = false;
+                    // Create an anchor at the reticle's position
+                    frame.createAnchor(reticle.matrix, referenceSpace).then(
+                        (anchor) => {
+                            placeObject(anchor);
+                            saveAnchors();
+                        },
+                        (error) => {
+                            console.error("Could not create anchor: " + error);
+                        }
+                    );
+                }
+
+                // --- Anchor Persistence and Tracking Logic ---
+                // Check if any of our saved anchors are being tracked
+                for (const anchor of frame.trackedAnchors) {
+                    if (savedAnchorUUIDs.has(anchor.anchorUUID) && !placedObjects.has(anchor)) {
+                        // Found a saved anchor that we haven't created an object for yet
+                        console.log("Restoring object for anchor:", anchor.anchorUUID);
+                        placeObject(anchor);
+                    }
+                }
+
+                // --- Update Object Positions ---
+                // Update the position of all our placed objects based on their anchor's current pose
+                for (const [anchor, object] of placedObjects.entries()) {
+                    // getPose can be null if the anchor is temporarily not being tracked
+                    const pose = frame.getPose(anchor.anchorSpace, referenceSpace);
+                    if (pose) {
+                        object.matrix.fromArray(pose.transform.matrix);
+                        object.visible = true;
+                    } else {
+                        // Hide the object if its anchor can't be found
+                        object.visible = false;
+                    }
+                }
+            }
             renderer.render(scene, camera);
         }
-
-        // Start the application
-        init();
-        animate();
-
     </script>
 </body>
 </html>
