@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geo-Pin Radar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: manipulation; /* Prevents double-tap zoom on mobile */
+        }
+        .radar-sweep {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(0deg, rgba(16, 185, 129, 0) 50%, rgba(16, 185, 129, 0.4) 100%);
+            transform-origin: 50% 50%;
+            animation: sweep 3s linear infinite;
+            border-radius: 50%;
+        }
+        @keyframes sweep {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .blip {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 16px;
+            height: 16px;
+            background-color: #f43f5e; /* Rose 500 */
+            border-radius: 50%;
+            border: 2px solid white;
+            transform: translate(-50%, -50%);
+            display: none; /* Hidden by default */
+            box-shadow: 0 0 10px #f43f5e, 0 0 20px #f43f5e;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-md text-center">
+        <h1 class="text-3xl font-bold text-emerald-400 mb-2">Geo-Pin Radar</h1>
+        <p class="text-gray-400 mb-6" id="status-text">Set a pin to begin navigation.</p>
+
+        <!-- Radar Display -->
+        <div id="radar" class="relative w-80 h-80 sm:w-96 sm:h-96 mx-auto bg-gray-800 rounded-full border-4 border-gray-700 flex items-center justify-center overflow-hidden mb-6 shadow-2xl">
+            <!-- Radar Grid Lines -->
+            <div class="absolute w-full h-px bg-gray-700/50"></div>
+            <div class="absolute h-full w-px bg-gray-700/50"></div>
+            <div class="absolute w-3/4 h-3/4 border-2 border-dashed border-gray-700/50 rounded-full"></div>
+            <div class="absolute w-1/2 h-1/2 border-2 border-dashed border-gray-700/50 rounded-full"></div>
+            
+            <!-- Radar Sweep Animation -->
+            <div id="radar-sweep" class="radar-sweep" style="display: none;"></div>
+
+            <!-- User's Position (Center) -->
+            <div class="w-4 h-4 bg-emerald-400 rounded-full border-2 border-white shadow-lg"></div>
+
+            <!-- Pin Blip -->
+            <div id="blip" class="blip"></div>
+        </div>
+
+        <!-- Information Display -->
+        <div id="info-panel" class="bg-gray-800 p-4 rounded-lg shadow-lg mb-6 text-center">
+            <h2 class="text-lg font-semibold text-gray-300">Distance to Pin</h2>
+            <p id="distance" class="text-3xl font-bold text-emerald-400">-</p>
+            <h2 class="text-lg font-semibold text-gray-300 mt-2">Direction</h2>
+            <p id="direction" class="text-xl font-medium text-emerald-400">-</p>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex space-x-4 justify-center">
+            <button id="set-pin-btn" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-transform transform hover:scale-105 w-36">
+                Set Pin
+            </button>
+            <button id="clear-pin-btn" class="bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-transform transform hover:scale-105 w-36" disabled>
+                Clear Pin
+            </button>
+        </div>
+        
+        <!-- Message Box -->
+        <div id="message-box" class="fixed top-5 right-5 bg-red-500 text-white p-4 rounded-lg shadow-lg" style="display: none;"></div>
+
+    </div>
+
+    <script>
+        // DOM Elements
+        const setPinBtn = document.getElementById('set-pin-btn');
+        const clearPinBtn = document.getElementById('clear-pin-btn');
+        const statusText = document.getElementById('status-text');
+        const distanceDisplay = document.getElementById('distance');
+        const directionDisplay = document.getElementById('direction');
+        const radarSweep = document.getElementById('radar-sweep');
+        const blip = document.getElementById('blip');
+        const messageBox = document.getElementById('message-box');
+
+        // State variables
+        let pinLocation = null;
+        let watchId = null;
+
+        // --- Event Listeners ---
+        setPinBtn.addEventListener('click', setPin);
+        clearPinBtn.addEventListener('click', clearPin);
+
+        // --- Core Functions ---
+
+        /**
+         * Sets the virtual pin at the user's current location.
+         */
+        function setPin() {
+            if (!navigator.geolocation) {
+                showMessage("Geolocation is not supported by your browser.");
+                return;
+            }
+
+            statusText.textContent = "Acquiring GPS signal...";
+            setPinBtn.disabled = true;
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    pinLocation = {
+                        lat: position.coords.latitude,
+                        lon: position.coords.longitude
+                    };
+                    statusText.textContent = `Pin set! Lat: ${pinLocation.lat.toFixed(4)}, Lon: ${pinLocation.lon.toFixed(4)}`;
+                    setPinBtn.textContent = 'Pin Set';
+                    clearPinBtn.disabled = false;
+                    radarSweep.style.display = 'block';
+                    startRadar();
+                },
+                handleLocationError,
+                { enableHighAccuracy: true }
+            );
+        }
+
+        /**
+         * Clears the virtual pin and stops the radar.
+         */
+        function clearPin() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            pinLocation = null;
+            statusText.textContent = "Pin cleared. Set a new pin to begin.";
+            distanceDisplay.textContent = "-";
+            directionDisplay.textContent = "-";
+            blip.style.display = 'none';
+            radarSweep.style.display = 'none';
+            
+            setPinBtn.disabled = false;
+            setPinBtn.textContent = 'Set Pin';
+            clearPinBtn.disabled = true;
+        }
+
+        /**
+         * Starts watching the user's position to update the radar.
+         */
+        function startRadar() {
+            if (!pinLocation) return;
+
+            statusText.textContent = "Radar active. Move to see updates.";
+            watchId = navigator.geolocation.watchPosition(
+                updateRadar,
+                handleLocationError,
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+            );
+        }
+
+        /**
+         * Callback function for watchPosition. Updates the UI with new data.
+         * @param {GeolocationPosition} position - The new position object.
+         */
+        function updateRadar(position) {
+            if (!pinLocation) return;
+
+            const currentLocation = {
+                lat: position.coords.latitude,
+                lon: position.coords.longitude
+            };
+
+            const distance = calculateDistance(currentLocation.lat, currentLocation.lon, pinLocation.lat, pinLocation.lon);
+            const bearing = calculateBearing(currentLocation.lat, currentLocation.lon, pinLocation.lat, pinLocation.lon);
+
+            // Update text displays
+            distanceDisplay.textContent = formatDistance(distance);
+            directionDisplay.textContent = getDirection(bearing);
+
+            // Update radar blip
+            updateBlipPosition(distance, bearing);
+        }
+        
+        /**
+         * Updates the position of the blip on the radar display.
+         * @param {number} distance - Distance to the pin in km.
+         * @param {number} bearing - Bearing to the pin in degrees.
+         */
+        function updateBlipPosition(distance, bearing) {
+            blip.style.display = 'block';
+            
+            // The radar radius is half its width (e.g., 160px for a 320px radar)
+            // We scale the blip's distance from the center.
+            // Let's say anything over 1km is at the edge.
+            const radarRadius = blip.parentElement.offsetWidth / 2;
+            const maxDistanceForScale = 1; // 1 km
+            const distanceRatio = Math.min(distance, maxDistanceForScale) / maxDistanceForScale;
+            const blipRadius = radarRadius * distanceRatio * 0.9; // * 0.9 to keep it inside the border
+
+            // Convert bearing to x, y coordinates
+            // 0 degrees (North) should be at the top, so we subtract 90 degrees
+            const angleRad = (bearing - 90) * (Math.PI / 180);
+            const x = blipRadius * Math.cos(angleRad);
+            const y = blipRadius * Math.sin(angleRad);
+
+            blip.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+        }
+
+
+        // --- Helper & Calculation Functions ---
+
+        /**
+         * Calculates distance between two lat/lon points using Haversine formula.
+         * @returns {number} Distance in kilometers.
+         */
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Radius of the Earth in km
+            const dLat = deg2rad(lat2 - lat1);
+            const dLon = deg2rad(lon2 - lon1);
+            const a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c; // Distance in km
+        }
+
+        /**
+         * Calculates the bearing between two lat/lon points.
+         * @returns {number} Bearing in degrees.
+         */
+        function calculateBearing(lat1, lon1, lat2, lon2) {
+            const y = Math.sin(deg2rad(lon2 - lon1)) * Math.cos(deg2rad(lat2));
+            const x = Math.cos(deg2rad(lat1)) * Math.sin(deg2rad(lat2)) -
+                      Math.sin(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.cos(deg2rad(lon2 - lon1));
+            const bearing = rad2deg(Math.atan2(y, x));
+            return (bearing + 360) % 360; // Normalize to 0-360
+        }
+
+        function deg2rad(deg) {
+            return deg * (Math.PI / 180);
+        }
+
+        function rad2deg(rad) {
+            return rad * (180 / Math.PI);
+        }
+
+        /**
+         * Formats the distance for display.
+         * @param {number} km - Distance in kilometers.
+         * @returns {string} Formatted distance string.
+         */
+        function formatDistance(km) {
+            if (km < 1) {
+                return `${(km * 1000).toFixed(0)} m`;
+            }
+            return `${km.toFixed(2)} km`;
+        }
+
+        /**
+         * Converts a bearing in degrees to a cardinal direction.
+         * @param {number} bearing - Bearing in degrees.
+         * @returns {string} Cardinal direction (e.g., N, NE, E).
+         */
+        function getDirection(bearing) {
+            const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+            const index = Math.round(bearing / 45) % 8;
+            return directions[index];
+        }
+        
+        /**
+         * Handles errors from the Geolocation API.
+         */
+        function handleLocationError(error) {
+            let message = "An unknown error occurred.";
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    message = "Geolocation permission denied. Please enable it in your browser settings.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message = "Location information is unavailable.";
+                    break;
+                case error.TIMEOUT:
+                    message = "The request to get user location timed out.";
+                    break;
+            }
+            showMessage(message);
+            statusText.textContent = "Error acquiring location.";
+            setPinBtn.disabled = false; // Re-enable button on error
+        }
+        
+        /**
+         * Displays a message to the user.
+         * @param {string} text - The message to display.
+         */
+        function showMessage(text) {
+            messageBox.textContent = text;
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 5000);
+        }
+
+    </script>
+</body>
+</html>
