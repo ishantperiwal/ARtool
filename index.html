@@ -16,44 +16,49 @@
         #ar-button {
             display: none;
         }
-        /* Make the container transparent during AR session to see the camera feed */
-        #main-container.ar-mode {
-            background-color: transparent;
-        }
         /* Ensure canvas doesn't interfere with UI layout before AR starts */
         canvas {
             display: block;
+        }
+        /* The dedicated overlay for in-AR UI */
+        #ar-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            padding: 1rem;
+            text-align: center;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.5), rgba(0,0,0,0));
         }
     </style>
 </head>
 <body class="bg-gray-900 text-white">
 
-    <!-- Main Container for UI -->
-    <div id="main-container" class="min-h-screen w-full h-full flex flex-col items-center justify-center p-4">
-        
-        <!-- UI Content -->
-        <div id="ui-container" class="w-full max-w-md text-center">
-            <h1 class="text-4xl font-bold mb-4">XR Hide & Seek</h1>
-            <p id="instructions" class="text-lg text-gray-300 mb-8">
-                Find a friend and a well-lit room to play!
-            </p>
-
-            <!-- AR Button -->
-            <button id="ar-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-xl transition-transform duration-200 transform hover:scale-105">
-                Start AR
-            </button>
-
-            <!-- Status Messages -->
-            <div id="status-message" class="mt-8 text-gray-400"></div>
-            <div id="unsupported-message" class="hidden mt-8 p-4 bg-red-800/50 border border-red-700 rounded-lg">
-                <h2 class="font-bold text-red-300">AR Not Supported</h2>
-                <p class="text-red-400">Your browser does not support the WebXR API, or you need to enable it in your browser settings. Please use a compatible browser like Chrome on an AR-enabled Android device.</p>
-            </div>
-             <div id="stabilization-message" class="hidden mt-4 text-yellow-400">
-                Move your device slowly to scan the area.
-            </div>
+    <!-- Initial UI Container -->
+    <div id="initial-ui-container" class="min-h-screen w-full h-full flex flex-col items-center justify-center p-4">
+        <h1 class="text-4xl font-bold mb-4">XR Hide & Seek</h1>
+        <p class="text-lg text-gray-300 mb-8">
+            Find a friend and a well-lit room to play!
+        </p>
+        <button id="ar-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-xl transition-transform duration-200 transform hover:scale-105">
+            Start AR
+        </button>
+        <div id="status-message" class="mt-8 text-gray-400"></div>
+        <div id="unsupported-message" class="hidden mt-8 p-4 bg-red-800/50 border border-red-700 rounded-lg">
+            <h2 class="font-bold text-red-300">AR Not Supported</h2>
+            <p class="text-red-400">Your browser does not support the WebXR API. Please use a compatible browser.</p>
         </div>
     </div>
+
+    <!-- In-AR UI Overlay -->
+    <div id="ar-overlay" class="hidden">
+        <p id="instructions" class="text-xl text-white mb-4"></p>
+        <div id="stabilization-message" class="hidden mt-4 text-yellow-400">
+            Move your device slowly to scan the area.
+        </div>
+    </div>
+
 
     <!-- Three.js Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -61,7 +66,6 @@
     <script type="module">
         // --- Basic Three.js Scene Setup ---
         const scene = new THREE.Scene();
-        // Explicitly set scene background to null for AR transparency.
         scene.background = null;
         const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -80,11 +84,13 @@
         let xrRefSpace = null;
         let xrHitTestSource = null;
         
-        let reticle; // The ring that shows where you can place objects
-        let hiddenObject = null; // The object to hide
-        let gameState = 'INITIAL'; // INITIAL, HIDING, SEEKING
+        let reticle;
+        let hiddenObject = null;
+        let gameState = 'INITIAL';
 
-        const mainContainer = document.getElementById('main-container');
+        // --- UI Elements ---
+        const initialUiContainer = document.getElementById('initial-ui-container');
+        const arOverlay = document.getElementById('ar-overlay');
         const arButton = document.getElementById('ar-button');
         const instructions = document.getElementById('instructions');
         const statusMessage = document.getElementById('status-message');
@@ -114,22 +120,16 @@
         // --- Initialize the AR Session ---
         async function onARSessionStart() {
             try {
+                // We don't need dom-overlay feature with this new structure
                 xrSession = await navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['hit-test', 'dom-overlay'],
-                    domOverlay: { root: mainContainer }
+                    requiredFeatures: ['hit-test']
                 });
 
-                // Set up the renderer and DOM for the AR session
                 document.body.appendChild(renderer.domElement);
-                mainContainer.classList.add('ar-mode');
                 
-                // Enforce correct stacking order
-                renderer.domElement.style.position = 'absolute';
-                renderer.domElement.style.top = '0';
-                renderer.domElement.style.left = '0';
-                renderer.domElement.style.zIndex = '1';
-                mainContainer.style.position = 'relative';
-                mainContainer.style.zIndex = '2';
+                // Hide initial UI, show AR overlay
+                initialUiContainer.style.display = 'none';
+                arOverlay.style.display = 'block';
 
                 xrRefSpace = await xrSession.requestReferenceSpace('local');
                 const viewerSpace = await xrSession.requestReferenceSpace('viewer');
@@ -137,9 +137,6 @@
 
                 xrSession.addEventListener('select', onSelect);
                 xrSession.addEventListener('end', onARSessionEnd);
-
-                arButton.style.display = 'none';
-                statusMessage.style.display = 'none';
                 
                 setGameState('HIDING');
 
@@ -154,15 +151,9 @@
         
         // --- Handle AR Session End ---
         function onARSessionEnd() {
-            mainContainer.classList.remove('ar-mode');
-            
-            // Reset styles
-            mainContainer.style.position = '';
-            mainContainer.style.zIndex = '';
-
-            arButton.style.display = 'block';
-            instructions.innerHTML = "Find a friend and a well-lit room to play!";
-            statusMessage.style.display = 'block';
+            // Show initial UI, hide AR overlay
+            initialUiContainer.style.display = 'flex';
+            arOverlay.style.display = 'none';
             stabilizationMessage.style.display = 'none';
 
             if (hiddenObject) hiddenObject.visible = false;
@@ -172,7 +163,6 @@
             if (restartButton) restartButton.remove();
 
             renderer.setAnimationLoop(null);
-            // Remove the canvas from the DOM
             if (renderer.domElement.parentElement) {
                 renderer.domElement.parentElement.removeChild(renderer.domElement);
             }
@@ -186,6 +176,7 @@
             const viewerPose = frame.getViewerPose(xrRefSpace);
             if (viewerPose) {
                 const view = viewerPose.views[0];
+                renderer.render(scene, camera); // Render first
                 camera.matrix.fromArray(view.transform.matrix);
                 camera.projectionMatrix.fromArray(view.projectionMatrix);
                 camera.updateMatrixWorld(true);
@@ -196,22 +187,22 @@
                         stabilizationMessage.style.display = 'none';
                         const hit = hitTestResults[0];
                         const pose = hit.getPose(xrRefSpace);
-                        reticle.visible = true;
-                        reticle.matrix.fromArray(pose.transform.matrix);
+                        if(reticle) {
+                            reticle.visible = true;
+                            reticle.matrix.fromArray(pose.transform.matrix);
+                        }
                     } else {
                         stabilizationMessage.style.display = 'block';
-                        reticle.visible = false;
+                        if(reticle) reticle.visible = false;
                     }
                 }
             }
-            
-            renderer.render(scene, camera);
         }
 
         // --- Game Logic ---
         function setGameState(newState) {
             gameState = newState;
-            const restartButton = instructions.querySelector('button');
+            const restartButton = arOverlay.querySelector('button');
             if (restartButton) restartButton.remove();
 
             switch (gameState) {
@@ -228,12 +219,11 @@
                     
                     const newRestartButton = document.createElement('button');
                     newRestartButton.innerText = 'Found It! (Play Again)';
-                    newRestartButton.className = 'bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg text-xl mt-4 transition-transform duration-200 transform hover:scale-105';
+                    newRestartButton.className = 'bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg text-lg mt-4 transition-transform duration-200 transform hover:scale-105';
                     newRestartButton.onclick = () => {
                         setGameState('HIDING');
                     };
-                    instructions.appendChild(document.createElement('br'));
-                    instructions.appendChild(newRestartButton);
+                    arOverlay.appendChild(newRestartButton);
                     break;
             }
         }
@@ -263,7 +253,7 @@
 
         // --- Handle User Input ---
         function onSelect() {
-            if (gameState === 'HIDING' && reticle.visible) {
+            if (gameState === 'HIDING' && reticle && reticle.visible) {
                 if (!hiddenObject) createHiddenObject();
                 
                 hiddenObject.position.setFromMatrixPosition(reticle.matrix);
