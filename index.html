@@ -32,7 +32,7 @@
             height: 100%;
             z-index: 2;
         }
-        /* UPDATED: Info panel is now a top-level overlay */
+        /* Info panel is a top-level overlay */
         #info-panel {
             position: fixed;
             top: 10px;
@@ -47,9 +47,9 @@
         }
         #ar-button { display: none !important; }
 
-        /* UPDATED: Loading indicator is now a top-level overlay */
+        /* Loading indicator is a top-level overlay */
         #loading-indicator {
-            position: fixed; /* Changed from absolute to fixed */
+            position: fixed; 
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
@@ -79,7 +79,7 @@
         </button>
     </div>
     
-    <!-- UPDATED: Moved info-panel and loading-indicator to be direct children of the body -->
+    <!-- Moved info-panel and loading-indicator to be direct children of the body -->
     <div id="loading-indicator">Loading Pins...</div>
     <div id="info-panel">
         <p id="status">Welcome! Loading map...</p>
@@ -126,6 +126,7 @@
 
         // --- MAP FUNCTIONS ---
         function initMap() {
+            // Using a location in Limerick, Ireland as a default
             const initialLocation = { lat: 52.6638, lng: -8.6267 }; 
             googleMap = new google.maps.Map(document.getElementById("map"), {
                 center: initialLocation,
@@ -144,8 +145,8 @@
             enterARButton.addEventListener('click', () => {
                 document.getElementById('map-container').style.display = 'none';
                 document.getElementById('ar-container').style.display = 'block';
-                // UPDATED: Manually show the info panel for the AR session
-                document.getElementById('info-panel').style.display = 'block';
+                
+                // The info panel is now shown inside the render loop, not here.
 
                 if (!arReady) {
                     initAR();
@@ -154,6 +155,7 @@
                 
                 placeExistingPinsInAR();
                 
+                // This programmatically clicks the hidden Three.js AR button
                 document.getElementById('ar-button').click();
             });
         }
@@ -185,6 +187,7 @@
         }
 
         function handleOrientation(event) {
+            // webkitCompassHeading is for iOS. alpha is the standard.
             const heading = event.webkitCompassHeading || event.alpha;
             if (heading !== null) {
                 deviceHeading = heading;
@@ -246,6 +249,7 @@
             allPinData = [];
             localStorage.removeItem('ar_gps_pins');
             updateStatus("All pins have been deleted.");
+            // Reload to clear map markers and state
             location.reload();
         }
 
@@ -312,18 +316,19 @@
         }
 
         function placePinInScene(position, data, isNew) {
+            // Avoid placing duplicate pins in the AR scene
             if (arPinsInScene.some(p => p.userData.id === data.id)) return;
 
             const geometry = new THREE.CylinderGeometry(0.01, 0.08, 0.4, 32);
             const material = new THREE.MeshStandardMaterial({
-                color: isNew ? 0xff3366 : 0xffff00,
+                color: isNew ? 0xff3366 : 0xffff00, // Red for new, Yellow for old
                 metalness: 0.4,
                 roughness: 0.6
             });
             const pin = new THREE.Mesh(geometry, material);
             
             pin.position.copy(position);
-            pin.position.y += 0.2; 
+            pin.position.y += 0.2; // Lift the pin so its base is on the ground
             
             pin.userData = data; 
             scene.add(pin);
@@ -343,7 +348,7 @@
                 anchor: new google.maps.Point(12, 12)
             };
 
-            const marker = new google.maps.Marker({
+            new google.maps.Marker({
                 position: { lat: data.lat, lng: data.lon },
                 map: googleMap,
                 icon: starIcon,
@@ -361,8 +366,8 @@
             navigator.geolocation.watchPosition(
                 (position) => {
                     const { latitude, longitude } = position.coords;
-                    // UPDATED: Simplified selector
                     document.getElementById('coords').textContent = `Lat/Lon: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+                    // Only recenter the map if we are not in AR mode
                     if (googleMap && !renderer?.xr.isPresenting) {
                         googleMap.setCenter({ lat: latitude, lng: longitude });
                     }
@@ -383,7 +388,6 @@
 
         function updateStatus(message) {
             console.log(message);
-            // UPDATED: Simplified selector
             document.getElementById('status').textContent = message;
         }
 
@@ -392,6 +396,13 @@
             if (!renderer) return; 
 
             if (renderer.xr.isPresenting && frame) {
+                // *** FIXED HERE ***
+                // This ensures the info panel is visible during an active AR session.
+                const infoPanel = document.getElementById('info-panel');
+                if (infoPanel.style.display !== 'block') {
+                    infoPanel.style.display = 'block';
+                }
+
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
@@ -405,20 +416,23 @@
                         hitTestSourceRequested = false;
                         hitTestSource = null;
 
+                        // Clean up AR scene
                         arPinsInScene.forEach(pin => scene.remove(pin));
                         arPinsInScene = [];
 
+                        // Switch back to map view
                         document.getElementById('ar-container').style.display = 'none';
                         document.getElementById('map-container').style.display = 'block';
-                        // UPDATED: Manually hide the info panel when exiting AR
+                        // Manually hide the info panel when exiting AR
                         document.getElementById('info-panel').style.display = 'none';
 
+                        // Recenter map on the last pin placed
                         if (allPinData.length > 0) {
                             const lastPin = allPinData[allPinData.length - 1];
                             googleMap.setCenter({ lat: lastPin.lat, lng: lastPin.lon });
                             googleMap.setZoom(20);
                         }
-                        console.log("Exited AR. View your pins on the map.");
+                        updateStatus("Exited AR. View your pins on the map.");
                     });
                     hitTestSourceRequested = true;
                 }
@@ -443,6 +457,7 @@
             }
 
             if (arReady) {
+                // Simple animation for the pins
                 arPinsInScene.forEach(pin => {
                     pin.rotation.y += 0.01; 
                 });
@@ -451,6 +466,7 @@
         }
     </script>
 
+    <!-- IMPORTANT: Replace YOUR_API_KEY with your actual Google Maps API key -->
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDKFpUFxl8pfNSbx0GlQhmvFaHePoBxhKs&callback=initApp&libraries=geometry" defer></script>
 
 </body>
