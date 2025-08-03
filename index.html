@@ -80,8 +80,6 @@
             const headingDirection = document.getElementById('heading-direction');
             const errorMessage = document.getElementById('error-message');
 
-            let lastHeading = 0;
-
             /**
              * Displays an error message to the user.
              * @param {string} message - The error message to show.
@@ -110,10 +108,6 @@
              * @param {number} heading - The new compass heading in degrees.
              */
             function updateCompass(heading) {
-                if (compassUI.style.opacity === '0') {
-                    compassUI.style.opacity = '1';
-                }
-
                 heading = Math.round(heading);
                 headingValue.textContent = heading;
                 headingDirection.textContent = getDirection(heading);
@@ -128,8 +122,9 @@
              * Starts the compass functionality after permissions are granted.
              */
             function startCompass() {
-                // Hide the permission overlay and show the compass UI
+                // Hide the permission overlay and show the compass UI immediately.
                 permissionOverlay.style.display = 'none';
+                compassUI.style.opacity = '1'; // Make the UI visible right away.
 
                 // --- Strategy 1: The Modern `AbsoluteOrientationSensor` ---
                 // This is the preferred API. It fuses data from accelerometer, gyroscope,
@@ -189,7 +184,7 @@
                     let heading = null;
 
                     // Case A: iOS devices (Safari) provide a non-standard `webkitCompassHeading`.
-                    if (event.webkitCompassHeading) {
+                    if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
                         heading = event.webkitCompassHeading;
                     }
                     // Case B: Modern Chrome/Firefox on Android provide absolute alpha.
