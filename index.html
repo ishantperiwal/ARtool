@@ -65,13 +65,13 @@
         const compassRose = document.getElementById('compass-rose');
 
         function handleOrientation(event) {
-            // event.alpha is the compass heading
-            const alpha = event.alpha; 
+            // Use webkitCompassHeading for iOS compatibility, otherwise use the standard alpha.
+            const heading = event.webkitCompassHeading || event.alpha;
             
-            if (alpha !== null) {
-                headingValue.textContent = Math.round(alpha);
-                // The compass rose points North, so we rotate it by the negative of the device heading
-                compassRose.style.transform = `rotate(${-alpha}deg)`;
+            if (heading !== null) {
+                headingValue.textContent = Math.round(heading);
+                // The compass rose's needle points North, so we rotate it by the negative of the device heading to align it.
+                compassRose.style.transform = `rotate(${-heading}deg)`;
             } else {
                 headingValue.textContent = 'N/A';
             }
@@ -86,7 +86,12 @@
                             window.addEventListener('deviceorientation', handleOrientation);
                             permissionOverlay.style.display = 'none';
                         } else {
-                            alert('Permission was denied.');
+                            // Using a custom message box instead of alert
+                            const deniedMsg = document.createElement('div');
+                            deniedMsg.textContent = 'Permission was denied. The compass cannot be displayed.';
+                            deniedMsg.className = 'absolute top-5 bg-red-500 text-white p-4 rounded-lg shadow-lg';
+                            document.body.appendChild(deniedMsg);
+                            setTimeout(() => deniedMsg.remove(), 3000);
                         }
                     })
                     .catch(console.error);
