@@ -21,6 +21,8 @@
             z-index: 100;
             display:block;
             padding: 10px;
+            background-color: rgba(0,0,0,0.3);
+            border-radius: 8px;
         }
         .control-button {
             position: absolute;
@@ -36,7 +38,7 @@
             cursor: pointer;
             z-index: 101;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: background-color 0.3s ease, transform 0.2s ease;
+            transition: all 0.3s ease;
         }
         #ar-button {
             background-color: #4A90E2;
@@ -55,13 +57,17 @@
         #orientation-button:active {
             transform: translateX(-50%) scale(0.95);
         }
+        #orientation-button:disabled {
+            background-color: #999;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
     <div id="info">
-        Point your camera at a surface, then tap the screen to place a cube.
+        Welcome! Click "Enable Motion Control" to look around, or "Enter AR" to place objects.
     </div>
-    <!-- Button for enabling motion controls will be added here by JS -->
+    <!-- Buttons will be added here by JS -->
 
     <script type="importmap">
         {
@@ -82,12 +88,12 @@
         let controller;
         let reticle; 
         let orientationControls;
-        let arButton;
+        let arButton, orientationButton;
+        let infoDiv;
 
         let hitTestSource = null;
         let hitTestSourceRequested = false;
 
-        // We'll use this to keep track of all placed cubes
         const placedObjects = [];
 
         init();
@@ -96,6 +102,8 @@
         function init() {
             container = document.createElement('div');
             document.body.appendChild(container);
+
+            infoDiv = document.getElementById('info');
 
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
@@ -113,11 +121,9 @@
             renderer.xr.enabled = true;
             container.appendChild(renderer.domElement);
 
-            // --- Device Orientation Controls Setup ---
             orientationControls = new DeviceOrientationControls(camera);
-            orientationControls.enabled = false; // Disabled by default
+            orientationControls.enabled = false;
 
-            // --- Button Setup ---
             setupButtons();
             
             reticle = new THREE.Mesh(
@@ -136,32 +142,36 @@
         }
 
         function setupButtons() {
-            // AR Button
             arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
             arButton.id = "ar-button";
             arButton.classList.add("control-button");
             document.body.appendChild(arButton);
 
-            // Orientation Button
-            const orientationButton = document.createElement('button');
+            orientationButton = document.createElement('button');
             orientationButton.id = 'orientation-button';
             orientationButton.classList.add('control-button');
             orientationButton.textContent = 'Enable Motion Control';
-            orientationButton.style.display = 'block'; // Show it initially
             
             orientationButton.onclick = () => {
-                // Feature detection for iOS
+                // Feature detection for iOS 13+
                 if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    orientationButton.textContent = 'Requesting...';
                     DeviceOrientationEvent.requestPermission().then(permissionState => {
                         if (permissionState === 'granted') {
+                            infoDiv.textContent = 'Motion controls enabled. Tilt your device to look around.';
                             orientationControls.enabled = true;
-                            orientationButton.style.display = 'none'; // Hide after enabling
+                            orientationButton.style.display = 'none';
+                        } else {
+                            infoDiv.textContent = 'Permission denied. Motion controls require sensor access.';
+                            orientationButton.textContent = 'Permission Denied';
+                            orientationButton.disabled = true;
                         }
                     }).catch(console.error);
                 } else {
                     // For non-iOS devices
+                    infoDiv.textContent = 'Motion controls enabled. Tilt your device to look around.';
                     orientationControls.enabled = true;
-                    orientationButton.style.display = 'none'; // Hide after enabling
+                    orientationButton.style.display = 'none';
                 }
             };
             document.body.appendChild(orientationButton);
@@ -178,7 +188,7 @@
                 const cube = new THREE.Mesh(geometry, material);
                 cube.position.setFromMatrixPosition(reticle.matrix);
                 scene.add(cube);
-                placedObjects.push(cube); // Add to our list of objects
+                placedObjects.push(cube);
             }
         }
 
@@ -195,18 +205,21 @@
         function render(timestamp, frame) {
             const session = renderer.xr.getSession();
 
-            // --- Handle Controls based on AR session state ---
-            if (session) { // We are in an AR session
+            // Handle visibility and state of controls
+            if (session) { // In AR session
                 if (orientationControls.enabled) {
-                    orientationControls.enabled = false; // Disable orientation controls
-                    document.getElementById('orientation-button').style.display = 'none';
+                    orientationControls.enabled = false;
                 }
-            } else { // We are NOT in an AR session
+                orientationButton.style.display = 'none';
+                infoDiv.textContent = 'Point your camera at a surface, then tap to place a cube.';
+            } else { // Not in AR session
                 if (orientationControls.enabled) {
-                    orientationControls.update(); // Update camera based on device tilt
+                    orientationControls.update();
                 } else {
-                    // Show the button to enable motion controls if it's not already enabled
-                     document.getElementById('orientation-button').style.display = 'block';
+                    // Only show the button if it's not disabled
+                    if (!orientationButton.disabled) {
+                        orientationButton.style.display = 'block';
+                    }
                 }
             }
 
@@ -214,8 +227,8 @@
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 
                 if (hitTestSourceRequested === false) {
-                    session.requestReferenceSpace('viewer').then((referenceSpace) => {
-                        session.requestHitTestSource({ space: referenceSpace }).then((source) => {
+                    session.requestReferenceSpace('viewer').then((refSpace) => {
+                        session.requestHitTestSource({ space: refSpace }).then((source) => {
                             hitTestSource = source;
                         });
                     });
@@ -223,6 +236,7 @@
                     session.addEventListener('end', () => {
                         hitTestSourceRequested = false;
                         hitTestSource = null;
+                        infoDiv.textContent = 'Welcome back! Enable motion controls or re-enter AR.';
                     });
 
                     hitTestSourceRequested = true;
@@ -240,7 +254,6 @@
                 }
             }
 
-            // Rotate all placed cubes
             placedObjects.forEach(object => {
                 object.rotation.y += 0.01;
                 object.rotation.x += 0.005;
