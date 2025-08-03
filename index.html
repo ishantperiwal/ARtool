@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Web Compass</title>
+    <title>Web Compass with Calibration</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
@@ -13,17 +13,19 @@
             font-family: 'Inter', sans-serif;
             -webkit-tap-highlight-color: transparent;
         }
-        /* Prevents the compass from "snapping" when crossing the 0/360 degree mark */
         .compass-rose {
             transition: transform 0.2s linear;
+        }
+        .progress-bar-inner {
+            transition: width 0.2s ease-out;
         }
     </style>
 </head>
 <body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen overflow-hidden">
 
-    <!-- Permission Overlay: This is crucial for iOS 13+ and good practice for all browsers -->
-    <div id="permission-overlay" class="absolute inset-0 bg-gray-900 bg-opacity-90 flex flex-col items-center justify-center z-20">
-        <div class="text-center">
+    <!-- 1. Permission Overlay -->
+    <div id="permission-overlay" class="absolute inset-0 bg-gray-900 bg-opacity-95 flex flex-col items-center justify-center z-30">
+        <div class="text-center p-4">
             <h1 class="text-3xl font-bold mb-2">Web Compass</h1>
             <p class="text-gray-400 mb-6">Please grant permission to access device sensors.</p>
             <button id="permission-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
@@ -32,208 +34,224 @@
         </div>
     </div>
 
-    <!-- Main Compass UI -->
-    <div id="compass-ui" class="flex flex-col items-center justify-center opacity-0 transition-opacity duration-500">
+    <!-- 2. Calibration Overlay -->
+    <div id="calibration-overlay" class="hidden absolute inset-0 bg-gray-900 flex-col items-center justify-center z-20">
+        <div class="text-center p-4">
+            <h2 class="text-2xl font-bold mb-2">Calibrating...</h2>
+            <p class="text-gray-400 mb-6">For best results, please move your device in a figure-8 pattern.</p>
+            <div class="w-64 bg-gray-700 rounded-full h-4">
+                <div id="progress-bar" class="bg-green-500 h-4 rounded-full progress-bar-inner" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Main Compass UI -->
+    <div id="compass-ui" class="hidden flex-col items-center justify-center">
         <div class="relative w-64 h-64 sm:w-80 sm:h-80">
-            <!-- Static outer bezel of the compass -->
             <div class="absolute inset-0 border-8 border-gray-700 rounded-full shadow-2xl"></div>
-            <!-- The rotating compass rose SVG -->
             <div id="compass-rose-container" class="w-full h-full">
                  <svg class="compass-rose w-full h-full" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="100" cy="100" r="95" fill="#1F2937" stroke="#4B5563" stroke-width="2"/>
-                    <!-- Cardinal Directions -->
                     <text x="100" y="25" font-family="Inter, sans-serif" font-size="20" font-weight="bold" fill="#E53E3E" text-anchor="middle">N</text>
                     <text x="100" y="185" font-family="Inter, sans-serif" font-size="18" fill="white" text-anchor="middle">S</text>
                     <text x="15" y="105" font-family="Inter, sans-serif" font-size="18" fill="white" text-anchor="middle">W</text>
                     <text x="185" y="105" font-family="Inter, sans-serif" font-size="18" fill="white" text-anchor="middle">E</text>
-                    <!-- Ticks -->
                     <line x1="100" y1="10" x2="100" y2="20" stroke="white" stroke-width="2"/>
                     <line x1="100" y1="180" x2="100" y2="190" stroke="white" stroke-width="2"/>
                     <line x1="10" y1="100" x2="20" y2="100" stroke="white" stroke-width="2"/>
                     <line x1="180" y1="100" x2="190" y2="100" stroke="white" stroke-width="2"/>
                 </svg>
             </div>
-            <!-- The static indicator needle at the top -->
             <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-b-[24px] border-b-red-600"></div>
         </div>
-
-        <!-- Digital Heading Display -->
         <div class="text-center mt-6">
             <span id="heading-value" class="text-6xl font-bold tracking-tighter">--</span>
             <span class="text-2xl font-light text-gray-400 align-top">°</span>
         </div>
-        <div id="heading-direction" class="text-xl text-gray-400 font-medium mt-1">Waiting for data...</div>
+        <div id="heading-direction" class="text-xl text-gray-400 font-medium mt-1">Waiting...</div>
     </div>
     
-    <!-- Error Message Display -->
     <div id="error-message" class="hidden absolute bottom-4 bg-red-500 text-white text-center p-3 rounded-lg shadow-lg"></div>
-
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // DOM Element References
             const permissionButton = document.getElementById('permission-button');
             const permissionOverlay = document.getElementById('permission-overlay');
+            const calibrationOverlay = document.getElementById('calibration-overlay');
             const compassUI = document.getElementById('compass-ui');
+            const progressBar = document.getElementById('progress-bar');
             const compassRose = document.querySelector('.compass-rose');
             const headingValue = document.getElementById('heading-value');
             const headingDirection = document.getElementById('heading-direction');
             const errorMessage = document.getElementById('error-message');
 
-            /**
-             * Displays an error message to the user.
-             * @param {string} message - The error message to show.
-             */
+            // --- Calibration Settings ---
+            // Total degrees of rotation required to pass calibration.
+            // A figure-8 motion involves rotation on multiple axes. 720 degrees (2 full spins) is a good starting point.
+            const ROTATION_THRESHOLD = 720; 
+            let totalRotation = 0;
+            let lastMotionTimestamp = 0;
+
             function showError(message) {
                 errorMessage.textContent = message;
                 errorMessage.classList.remove('hidden');
-                setTimeout(() => {
-                    errorMessage.classList.add('hidden');
-                }, 5000);
+                setTimeout(() => errorMessage.classList.add('hidden'), 5000);
             }
 
-            /**
-             * Converts a heading in degrees to a cardinal direction.
-             * @param {number} heading - The heading in degrees (0-360).
-             * @returns {string} The cardinal direction (e.g., N, NE, E).
-             */
             function getDirection(heading) {
                 const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-                const index = Math.round(heading / 45) % 8;
-                return directions[index];
+                return directions[Math.round(heading / 45) % 8];
             }
 
-            /**
-             * Updates the compass UI with the new heading.
-             * @param {number} heading - The new compass heading in degrees.
-             */
             function updateCompass(heading) {
                 heading = Math.round(heading);
                 headingValue.textContent = heading;
                 headingDirection.textContent = getDirection(heading);
-                
-                // We rotate the compass rose opposite to the heading to make 'N' point up.
-                // This ensures the shortest rotation path, preventing the "spin back" issue.
                 const rotation = -heading;
                 compassRose.style.transform = `rotate(${rotation}deg)`;
             }
+            
+            /**
+             * This function is called once enough movement is detected.
+             * It removes the motion listener and starts the orientation listeners.
+             */
+            function onCalibrationComplete() {
+                window.removeEventListener('devicemotion', handleMotion);
+                calibrationOverlay.classList.add('hidden');
+                compassUI.classList.remove('hidden');
+                compassUI.classList.add('flex'); // Make it visible
+                startCompass();
+            }
 
             /**
-             * Starts the compass functionality after permissions are granted.
+             * Handles devicemotion events to track total rotation for calibration.
              */
-            function startCompass() {
-                // Hide the permission overlay and show the compass UI immediately.
-                permissionOverlay.style.display = 'none';
-                compassUI.style.opacity = '1'; // Make the UI visible right away.
+            function handleMotion(event) {
+                // Use performance.now() for a more reliable time delta
+                const now = performance.now();
+                if (lastMotionTimestamp === 0) {
+                    lastMotionTimestamp = now;
+                    return; // Skip first frame
+                }
+                const deltaTime = (now - lastMotionTimestamp) / 1000; // Time in seconds
+                lastMotionTimestamp = now;
 
-                // --- Strategy 1: The Modern `AbsoluteOrientationSensor` ---
-                // This is the preferred API. It fuses data from accelerometer, gyroscope,
-                // and magnetometer for a more stable and accurate reading.
+                if (event.rotationRate) {
+                    const { alpha, beta, gamma } = event.rotationRate;
+                    // Calculate the magnitude of the rotation vector
+                    const magnitude = Math.sqrt(alpha*alpha + beta*beta + gamma*gamma);
+                    
+                    if (magnitude > 1) { // Ignore tiny movements
+                        totalRotation += magnitude * deltaTime;
+                    }
+                }
+                
+                // Update progress bar
+                const progress = Math.min(100, (totalRotation / ROTATION_THRESHOLD) * 100);
+                progressBar.style.width = `${progress}%`;
+
+                if (totalRotation >= ROTATION_THRESHOLD) {
+                    onCalibrationComplete();
+                }
+            }
+
+            /**
+             * Starts listening for movement to calibrate.
+             */
+            function startCalibration() {
+                permissionOverlay.classList.add('hidden');
+                calibrationOverlay.classList.remove('hidden');
+                calibrationOverlay.classList.add('flex');
+
+                lastMotionTimestamp = 0;
+                totalRotation = 0;
+
+                if ('DeviceMotionEvent' in window) {
+                    window.addEventListener('devicemotion', handleMotion);
+                } else {
+                    // If motion events aren't supported, skip calibration and go to compass
+                    showError("Motion sensor not found. Skipping calibration.");
+                    onCalibrationComplete();
+                }
+            }
+
+            function startCompass() {
                 try {
                     if ('AbsoluteOrientationSensor' in window) {
                         const sensor = new AbsoluteOrientationSensor({ frequency: 60 });
-
                         sensor.addEventListener('reading', () => {
-                            // The sensor provides orientation as a quaternion.
                             const q = sensor.quaternion;
-                            // Formula to convert quaternion to a compass heading (yaw).
-                            // We calculate the yaw (rotation around the z-axis).
                             let yawRad = Math.atan2(2 * (q[0] * q[1] + q[2] * q[3]), 1 - 2 * (q[1] * q[1] + q[2] * q[2]));
-                            
-                            // Convert radians to degrees.
                             let heading = yawRad * (180 / Math.PI);
-                            
-                            // The result might be in the range -180 to 180. Adjust to 0-360.
-                            if (heading < 0) {
-                                heading += 360;
-                            }
-                            
-                            // The heading needs to be inverted for a clockwise compass from North.
+                            if (heading < 0) heading += 360;
                             heading = 360 - heading;
-                            if (heading >= 360) {
-                                heading -= 360;
-                            }
-
+                            if (heading >= 360) heading -= 360;
                             updateCompass(heading);
                         });
-
                         sensor.addEventListener('error', (event) => {
-                            if (event.error.name === 'NotAllowedError') {
-                                showError('Permission to access sensor was denied.');
-                            } else if (event.error.name === 'NotReadableError') {
-                                showError('Cannot connect to the sensor.');
-                                // If this fails, we could attempt the fallback here.
+                            if (event.error.name === 'NotReadableError') {
+                                showError('Cannot connect to sensor. Trying fallback.');
                                 startLegacyCompass();
                             }
                         });
-
                         sensor.start();
-                        return; // Success, no need for fallbacks.
+                        return;
                     }
                 } catch (error) {
-                     console.warn("AbsoluteOrientationSensor failed, trying fallback.", error);
+                    console.warn("AbsoluteOrientationSensor failed, trying fallback.", error);
                 }
-
-                // --- Strategy 2: Fallback to `DeviceOrientationEvent` ---
-                // This is necessary for older browsers or those without the Generic Sensor API.
                 startLegacyCompass();
             }
             
             function startLegacyCompass() {
                 const orientationHandler = (event) => {
                     let heading = null;
-
-                    // Case A: iOS devices (Safari) provide a non-standard `webkitCompassHeading`.
                     if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
                         heading = event.webkitCompassHeading;
-                    }
-                    // Case B: Modern Chrome/Firefox on Android provide absolute alpha.
-                    // The `absolute` property must be true.
-                    else if (event.absolute === true && event.alpha !== null) {
+                    } else if (event.absolute === true && event.alpha !== null) {
                         heading = 360 - event.alpha;
                     }
-
                     if (heading !== null) {
-                         if (heading < 0) heading += 360;
-                         if (heading >= 360) heading -= 360;
+                        if (heading < 0) heading += 360;
+                        if (heading >= 360) heading -= 360;
                         updateCompass(heading);
                     }
                 };
                 
-                // We listen for 'deviceorientationabsolute' first, which is Chrome's
-                // way of providing the magnetometer-based reading.
                 if ('ondeviceorientationabsolute' in window) {
                     window.addEventListener('deviceorientationabsolute', orientationHandler);
-                }
-                // The standard 'deviceorientation' is the final fallback.
-                else if ('ondeviceorientation' in window) {
+                } else if ('ondeviceorientation' in window) {
                     window.addEventListener('deviceorientation', orientationHandler);
                 } else {
                     showError('Compass functionality is not supported by your browser.');
                 }
             }
 
-
-            // --- Permission Handling ---
             permissionButton.addEventListener('click', () => {
-                // iOS 13+ requires this specific function to be called on a user gesture.
+                // First, request permission for DeviceOrientationEvent (required for iOS)
                 if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    DeviceOrientationEvent.requestPermission()
-                        .then(permissionState => {
-                            if (permissionState === 'granted') {
-                                startCompass();
+                    DeviceOrientationEvent.requestPermission().then(orientationState => {
+                        if (orientationState === 'granted') {
+                            // Then, request permission for DeviceMotionEvent
+                            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                                DeviceMotionEvent.requestPermission().then(motionState => {
+                                    if (motionState === 'granted') {
+                                        startCalibration();
+                                    } else {
+                                        showError('Permission for motion sensor was denied.');
+                                    }
+                                }).catch(err => showError('Error requesting motion permission.'));
                             } else {
-                                showError('Permission to access device orientation was denied.');
+                                // For non-iOS 13+ browsers
+                                startCalibration();
                             }
-                        })
-                        .catch(error => {
-                            console.error(error);
-                            showError('An error occurred while requesting permission.');
-                        });
+                        } else {
+                            showError('Permission for orientation sensor was denied.');
+                        }
+                    }).catch(err => showError('Error requesting orientation permission.'));
                 } else {
-                    // For all other browsers (e.g., Chrome on Android), permission is
-                    // handled by the browser's standard prompt when the sensor is first accessed.
-                    startCompass();
+                    // For all other browsers
+                    startCalibration();
                 }
             });
         });
