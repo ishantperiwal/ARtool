@@ -117,6 +117,9 @@
 
         // --- APPLICATION INITIALIZATION ---
         window.initApp = () => {
+            // *** FIXED HERE: Show the info panel right from the start ***
+            document.getElementById('info-panel').style.display = 'block';
+            
             initMap();
             watchGPS();
             setupEnterARButton();
@@ -146,8 +149,6 @@
                 document.getElementById('map-container').style.display = 'none';
                 document.getElementById('ar-container').style.display = 'block';
                 
-                // The info panel is now shown inside the render loop, not here.
-
                 if (!arReady) {
                     initAR();
                     arReady = true;
@@ -396,7 +397,6 @@
             if (!renderer) return; 
 
             if (renderer.xr.isPresenting && frame) {
-                // *** FIXED HERE ***
                 // This ensures the info panel is visible during an active AR session.
                 const infoPanel = document.getElementById('info-panel');
                 if (infoPanel.style.display !== 'block') {
@@ -423,8 +423,8 @@
                         // Switch back to map view
                         document.getElementById('ar-container').style.display = 'none';
                         document.getElementById('map-container').style.display = 'block';
-                        // Manually hide the info panel when exiting AR
-                        document.getElementById('info-panel').style.display = 'none';
+                        
+                        // *** FIXED HERE: No longer hiding the panel when exiting AR ***
 
                         // Recenter map on the last pin placed
                         if (allPinData.length > 0) {
