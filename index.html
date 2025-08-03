@@ -12,16 +12,16 @@
             margin: 0;
             overflow: hidden; /* Prevent scrollbars */
         }
-        /* The container for the entire AR experience */
+        /* This container holds the entire AR experience. It's hidden by default. */
         #ar-container {
             position: absolute;
             top: 0;
             left: 0;
             width: 100vw;
             height: 100vh;
-            display: none; /* Hidden by default */
+            display: none; /* Hidden until AR session starts */
         }
-        /* The 3D canvas needs to be behind the UI */
+        /* The 3D canvas needs to be positioned absolutely behind the UI overlay. */
         #ar-container canvas {
             position: absolute;
             top: 0;
@@ -30,22 +30,19 @@
             height: 100%;
             z-index: 1;
         }
-        /* The dedicated overlay for in-AR UI */
+        /* The UI that floats on top of the AR view. */
         #ar-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
+            position: relative; /* Changed from absolute to relative to stack correctly */
             z-index: 2; /* Ensures UI is on top of the canvas */
             padding: 1rem;
             text-align: center;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.5), rgba(0,0,0,0));
+            background: linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0));
         }
     </style>
 </head>
 <body class="bg-gray-900 text-white">
 
-    <!-- Initial UI Container -->
+    <!-- This is the UI shown before the AR session starts. -->
     <div id="initial-ui-container" class="min-h-screen w-full h-full flex flex-col items-center justify-center p-4">
         <h1 class="text-4xl font-bold mb-4">XR Hide & Seek</h1>
         <p class="text-lg text-gray-300 mb-8">
@@ -61,9 +58,8 @@
         </div>
     </div>
 
-    <!-- AR Experience Container -->
+    <!-- This container will hold the canvas and the AR UI. -->
     <div id="ar-container">
-        <!-- In-AR UI Overlay -->
         <div id="ar-overlay">
             <p id="instructions" class="text-xl text-white mb-4"></p>
             <div id="stabilization-message" class="hidden mt-4 text-yellow-400">
@@ -72,14 +68,12 @@
         </div>
     </div>
 
-
     <!-- Three.js Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script type="module">
         // --- Basic Three.js Scene Setup ---
         const scene = new THREE.Scene();
-        scene.background = null;
         const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -96,7 +90,6 @@
         let xrSession = null;
         let xrRefSpace = null;
         let xrHitTestSource = null;
-        
         let reticle;
         let hiddenObject = null;
         let gameState = 'INITIAL';
@@ -134,18 +127,17 @@
         // --- Initialize the AR Session ---
         async function onARSessionStart() {
             try {
-                xrSession = await navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['hit-test']
-                });
+                xrSession = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['hit-test'] });
 
-                // Make body transparent and show AR container
+                // CRITICAL: Make the body transparent to see the camera feed.
                 document.body.style.backgroundColor = 'transparent';
                 initialUiContainer.style.display = 'none';
                 arContainer.style.display = 'block';
                 
-                // Add the renderer's canvas to the AR container
+                // Add the renderer's canvas to the AR container.
                 arContainer.appendChild(renderer.domElement);
 
+                // Set up the XR reference spaces.
                 xrRefSpace = await xrSession.requestReferenceSpace('local');
                 const viewerSpace = await xrSession.requestReferenceSpace('viewer');
                 xrHitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
@@ -154,9 +146,7 @@
                 xrSession.addEventListener('end', onARSessionEnd);
                 
                 setGameState('HIDING');
-
                 renderer.setAnimationLoop(onXRFrame);
-                
             } catch (e) {
                 console.error("Failed to start AR session:", e);
                 unsupportedMessage.innerText = `Failed to start AR session: ${e.message}`;
@@ -166,19 +156,19 @@
         
         // --- Handle AR Session End ---
         function onARSessionEnd() {
-            // Restore initial UI state
+            // CRITICAL: Restore the original UI state.
             document.body.style.backgroundColor = ''; // Reverts to CSS color
-            document.body.classList.add('bg-gray-900');
             initialUiContainer.style.display = 'flex';
             arContainer.style.display = 'none';
             stabilizationMessage.style.display = 'none';
 
+            // Clean up objects and UI.
             if (hiddenObject) hiddenObject.visible = false;
             if (reticle) reticle.visible = false;
-            
             const restartButton = arOverlay.querySelector('button');
             if (restartButton) restartButton.remove();
 
+            // Stop the render loop and clean up the canvas.
             renderer.setAnimationLoop(null);
             if (renderer.domElement.parentElement) {
                 renderer.domElement.parentElement.removeChild(renderer.domElement);
@@ -192,11 +182,13 @@
 
             const pose = frame.getViewerPose(xrRefSpace);
             if (pose) {
+                // Update camera and render the scene.
                 const view = pose.views[0];
                 camera.matrix.fromArray(view.transform.matrix);
                 camera.projectionMatrix.fromArray(view.projectionMatrix);
                 camera.updateMatrixWorld(true);
 
+                // Handle hit testing for placing the object.
                 if (xrHitTestSource && gameState === 'HIDING') {
                     const hitTestResults = frame.getHitTestResults(xrHitTestSource);
                     if (hitTestResults.length > 0) {
