@@ -56,10 +56,13 @@
     </div>
     <button id="ar-button">Start AR</button>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/webxr/ARButton.js"></script>
+    <!-- The necessary scripts are now imported as modules below -->
 
     <script type="module">
+        // Import THREE.js and ARButton as modules for reliability
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js';
+        import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/ARButton.js';
+
         // Ensure Three.js is loaded
         if (typeof THREE === 'undefined') {
             console.error('THREE.js has not been loaded');
@@ -89,7 +92,7 @@
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
-            // Create the AR button
+            // Create the AR button using the imported module
             const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
             document.getElementById('ar-button').replaceWith(arButton);
 
