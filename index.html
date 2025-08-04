@@ -1,313 +1,183 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>WebXR AR Hit-Test with Motion Controls</title>
+    <title>WebXR Pin Collector</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/three@0.165.0/examples/css/main.css">
     <style>
         body {
-            background-color: #000;
-            color: #fff;
             font-family: 'Inter', sans-serif;
             margin: 0;
-            overflow: hidden;
-        }
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            z-index: 100;
-            display:block;
-            padding: 10px;
-            background-color: rgba(0,0,0,0.3);
-            border-radius: 8px;
-        }
-        .control-button {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 12px 24px;
-            border-radius: 8px;
-            color: white;
-            font-size: 16px;
-            font-weight: bold;
-            border: none;
-            cursor: pointer;
-            z-index: 101;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
+            background-color: #f0f0f0;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            flex-direction: column;
         }
         #ar-button {
             background-color: #4A90E2;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            font-size: 18px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
         #ar-button:hover {
             background-color: #357ABD;
         }
-        #orientation-button {
-            bottom: 80px; /* Position it above the AR button */
-            background-color: #50C878; /* A green color */
-            display: none; /* Hidden by default */
+        #ar-button:active {
+            transform: scale(0.98);
         }
-        #orientation-button:hover {
-            background-color: #36A45C;
+        #info {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            text-align: center;
         }
-        #orientation-button:active {
-            transform: translateX(-50%) scale(0.95);
-        }
-        #orientation-button:disabled {
-            background-color: #999;
-            cursor: not-allowed;
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
         }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div id="info">
-        An object is in front of you. Enable motion controls to find it, or enter AR.
+        <h1>WebXR Pin Collector</h1>
+        <p>Click the button to start the AR experience and find the hidden pin!</p>
     </div>
-    <!-- Buttons will be added here by JS -->
+    <button id="ar-button">Start AR</button>
 
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
-            }
-        }
-    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/webxr/ARButton.js"></script>
 
     <script type="module">
-        import * as THREE from 'three';
-        import { ARButton } from 'three/addons/webxr/ARButton.js';
-        import { DeviceOrientationControls } from 'three/addons/controls/DeviceOrientationControls.js';
+        // Ensure Three.js is loaded
+        if (typeof THREE === 'undefined') {
+            console.error('THREE.js has not been loaded');
+        }
 
-        let container;
         let camera, scene, renderer;
+        let pin;
         let controller;
-        let reticle; 
-        let orientationControls;
-        let arButton, orientationButton;
-        let infoDiv;
-        let initialObject; // To hold our startup object
 
-        let hitTestSource = null;
-        let hitTestSourceRequested = false;
-        let initialObjectPlaced = false; // Flag to check if the initial object is placed in AR
-        let wasOrientationEnabledBeforeAR = false; // Flag to remember motion control state
-
-        const placedObjects = [];
-
-        init();
-        animate();
-
+        // Initialize the scene, camera, and renderer
         function init() {
-            container = document.createElement('div');
-            document.body.appendChild(container);
-
-            infoDiv = document.getElementById('info');
-
+            // Create a new scene
             scene = new THREE.Scene();
+
+            // Set up the camera
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-            light.position.set(0.5, 1, 0.25);
-            scene.add(light);
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(0, 5, 0);
-            scene.add(directionalLight);
-
+            // Set up the renderer
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            container.appendChild(renderer.domElement);
+            document.body.appendChild(renderer.domElement);
 
-            // --- Add listeners for session start/end to manage controls ---
-            renderer.xr.addEventListener('sessionstart', () => {
-                // Check if orientation controls were active before starting AR
-                if (orientationControls.enabled) {
-                    wasOrientationEnabledBeforeAR = true;
-                    orientationControls.enabled = false; // Disable them for the AR session
-                }
-                orientationButton.style.display = 'none';
-            });
+            // Add lighting to the scene
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            light.position.set(0.5, 1, 0.25);
+            scene.add(light);
 
-            renderer.xr.addEventListener('sessionend', () => {
-                // If motion controls were on before, re-enable them automatically
-                if (wasOrientationEnabledBeforeAR) {
-                    orientationControls.enabled = true;
-                    infoDiv.textContent = 'Motion controls re-enabled. Tilt your device to look around.';
-                    wasOrientationEnabledBeforeAR = false; // Reset the flag for the next cycle
-                } else {
-                    infoDiv.textContent = 'Welcome back! Enable motion controls or re-enter AR.';
-                }
-            });
+            // Create the AR button
+            const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
+            document.getElementById('ar-button').replaceWith(arButton);
 
-
-            orientationControls = new DeviceOrientationControls(camera);
-            orientationControls.enabled = false;
-
-            // --- Create the initial object ---
-            createInitialObject();
-
-            setupButtons();
-            
-            reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial()
-            );
-            reticle.matrixAutoUpdate = false;
-            reticle.visible = false;
-            scene.add(reticle);
-            
+            // Add a controller for input
             controller = renderer.xr.getController(0);
-            controller.addEventListener('select', onSelect);
             scene.add(controller);
 
+            // Create and add the pin to the scene
+            createPin();
+            
+            // Set the animation loop
+            renderer.setAnimationLoop(render);
+
+            // Handle window resizing
             window.addEventListener('resize', onWindowResize, false);
         }
 
-        function createInitialObject() {
-            const geometry = new THREE.IcosahedronGeometry(0.2, 0); 
-            const material = new THREE.MeshStandardMaterial({
-                color: 0xffd700, // Gold color
-                roughness: 0.3,
-                metalness: 0.8
-            });
-            initialObject = new THREE.Mesh(geometry, material);
+        // Function to create the 3D pin
+        function createPin() {
+            // Create a group to hold the parts of the pin
+            pin = new THREE.Group();
             
-            // Position it for the non-AR view first
-            initialObject.position.set(0, 0, -3); 
+            // Create the head of the pin (a sphere)
+            const headGeometry = new THREE.SphereGeometry(0.05, 32, 32);
+            const headMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Red color
+            const pinHead = new THREE.Mesh(headGeometry, headMaterial);
+            pinHead.position.y = 0.2; // Position the head on top of the body
             
-            scene.add(initialObject);
-            placedObjects.push(initialObject);
+            // Create the body of the pin (a cylinder)
+            const bodyGeometry = new THREE.CylinderGeometry(0.01, 0.01, 0.2, 32);
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc }); // Silver color
+            const pinBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            
+            // Add the head and body to the pin group
+            pin.add(pinHead);
+            pin.add(pinBody);
+            
+            // Initially hide the pin until it's placed
+            pin.visible = false;
+            
+            // Add the pin to the scene
+            scene.add(pin);
         }
-
-        function setupButtons() {
-            arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
-            arButton.id = "ar-button";
-            arButton.classList.add("control-button");
-            document.body.appendChild(arButton);
-
-            orientationButton = document.createElement('button');
-            orientationButton.id = 'orientation-button';
-            orientationButton.classList.add('control-button');
-            orientationButton.textContent = 'Enable Motion Control';
-            
-            orientationButton.onclick = () => {
-                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    orientationButton.textContent = 'Requesting...';
-                    DeviceOrientationEvent.requestPermission().then(permissionState => {
-                        if (permissionState === 'granted') {
-                            infoDiv.textContent = 'Motion controls enabled. Tilt your device to look around.';
-                            orientationControls.enabled = true;
-                            orientationButton.style.display = 'none';
-                        } else {
-                            infoDiv.textContent = 'Permission denied. Motion controls require sensor access.';
-                            orientationButton.textContent = 'Permission Denied';
-                            orientationButton.disabled = true;
-                        }
-                    }).catch(console.error);
-                } else {
-                    infoDiv.textContent = 'Motion controls enabled. Tilt your device to look around.';
-                    orientationControls.enabled = true;
-                    orientationButton.style.display = 'none';
-                }
-            };
-            document.body.appendChild(orientationButton);
-        }
-
-        function onSelect() {
-            if (reticle.visible) {
-                const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-                const material = new THREE.MeshStandardMaterial({
-                    color: 0xffffff * Math.random(),
-                    roughness: 0.7,
-                    metalness: 0.2
-                });
-                const cube = new THREE.Mesh(geometry, material);
-                cube.position.setFromMatrixPosition(reticle.matrix);
-                scene.add(cube);
-                placedObjects.push(cube);
+        
+        // Function to place the pin at a random location
+        function placePin() {
+            if (pin) {
+                // Generate random coordinates for placement
+                const x = (Math.random() - 0.5) * 4; // Random x between -2 and 2
+                const z = (Math.random() - 0.5) * 4 - 2; // Random z between -4 and 0 (in front of the user)
+                const y = 0; // Place it on the floor initially
+                
+                pin.position.set(x, y, z);
+                pin.visible = true;
+                console.log(`Pin placed at: x=${x.toFixed(2)}, y=${y.toFixed(2)}, z=${z.toFixed(2)}`);
             }
         }
 
+        // Handle window resize events
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
-
-        function animate() {
-            renderer.setAnimationLoop(render);
-        }
-
-        function render(timestamp, frame) {
-            const session = renderer.xr.getSession();
-
-            if (session) { 
-                 // AR-specific rendering logic
-                infoDiv.textContent = 'Point your camera at a surface...';
-
-                if (frame) {
-                    const referenceSpace = renderer.xr.getReferenceSpace();
-                    
-                    if (hitTestSourceRequested === false) {
-                        session.requestReferenceSpace('viewer').then((refSpace) => {
-                            session.requestHitTestSource({ space: refSpace }).then((source) => {
-                                hitTestSource = source;
-                            });
-                        });
-
-                        session.addEventListener('end', () => {
-                            hitTestSourceRequested = false;
-                            hitTestSource = null;
-                            initialObjectPlaced = false; // Reset for next session
-                            initialObject.position.set(0, 0, -3); // Reset for non-AR view
-                        });
-
-                        hitTestSourceRequested = true;
-                    }
-
-                    if (hitTestSource) {
-                        const hitTestResults = frame.getHitTestResults(hitTestSource);
-                        if (hitTestResults.length) {
-                            const hit = hitTestResults[0];
-                            
-                            // Place the initial object on the first detected surface
-                            if (!initialObjectPlaced) {
-                                initialObject.position.setFromMatrixPosition(hit.getPose(referenceSpace).transform.matrix);
-                                initialObjectPlaced = true;
-                                infoDiv.textContent = 'Initial object placed! You can now place more cubes.';
-                            }
-
-                            reticle.visible = true;
-                            reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
-                        } else {
-                            reticle.visible = false;
-                        }
-                    }
-                }
-            } else { 
-                // Non-AR rendering logic
-                if (orientationControls.enabled) {
-                    orientationControls.update();
-                } else {
-                    if (!orientationButton.disabled) {
-                        orientationButton.style.display = 'block';
-                    }
-                }
-            }
-
-            placedObjects.forEach(object => {
-                object.rotation.y += 0.01;
-                object.rotation.x += 0.005;
-            });
-
+        
+        // Render loop
+        function render() {
             renderer.render(scene, camera);
         }
+
+        // Start the application
+        init();
+
+        // Place the pin once the XR session starts
+        renderer.xr.addEventListener('sessionstart', () => {
+            console.log('WebXR session started');
+            // Hide the info text when AR starts
+            document.getElementById('info').style.display = 'none';
+            placePin();
+        });
+        
+        renderer.xr.addEventListener('sessionend', () => {
+            console.log('WebXR session ended');
+            // Show the info text when AR ends
+            document.getElementById('info').style.display = 'block';
+            pin.visible = false;
+        });
+
     </script>
 </body>
 </html>
