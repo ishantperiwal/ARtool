@@ -52,7 +52,7 @@
 <body>
     <div id="info">
         <h1>WebXR Pin Collector</h1>
-        <p>Click the button to start the AR experience and find the hidden pin!</p>
+        <p>Click "Start AR", find a flat surface, and tap the screen to place the pin!</p>
     </div>
     <button id="ar-button">Start AR</button>
 
@@ -63,14 +63,11 @@
         import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js';
         import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/ARButton.js';
 
-        // Ensure Three.js is loaded
-        if (typeof THREE === 'undefined') {
-            console.error('THREE.js has not been loaded');
-        }
-
         let camera, scene, renderer;
-        let pin;
+        let pin, reticle; // Reticle will show where the pin will be placed
         let controller;
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
 
         // Initialize the scene, camera, and renderer
         function init() {
@@ -92,16 +89,18 @@
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
-            // Create the AR button using the imported module
+            // Create the AR button, requesting the 'hit-test' feature
             const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
             document.getElementById('ar-button').replaceWith(arButton);
 
-            // Add a controller for input
+            // Set up the controller for user input (tapping)
             controller = renderer.xr.getController(0);
+            controller.addEventListener('select', onSelect);
             scene.add(controller);
 
-            // Create and add the pin to the scene
+            // Create the objects for our scene
             createPin();
+            createReticle();
             
             // Set the animation loop
             renderer.setAnimationLoop(render);
@@ -110,44 +109,54 @@
             window.addEventListener('resize', onWindowResize, false);
         }
 
+        // Function to handle the user tapping the screen
+        function onSelect() {
+            // Check if the reticle is currently visible (i.e., pointing at a surface)
+            if (reticle.visible) {
+                // Place the pin at the reticle's current position
+                placePin();
+            }
+        }
+
         // Function to create the 3D pin
         function createPin() {
-            // Create a group to hold the parts of the pin
             pin = new THREE.Group();
-            
-            // Create the head of the pin (a sphere)
             const headGeometry = new THREE.SphereGeometry(0.05, 32, 32);
-            const headMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Red color
+            const headMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
             const pinHead = new THREE.Mesh(headGeometry, headMaterial);
-            pinHead.position.y = 0.2; // Position the head on top of the body
+            pinHead.position.y = 0.15; // Adjusted position for new body length
             
-            // Create the body of the pin (a cylinder)
-            const bodyGeometry = new THREE.CylinderGeometry(0.01, 0.01, 0.2, 32);
-            const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc }); // Silver color
+            const bodyGeometry = new THREE.CylinderGeometry(0.01, 0.01, 0.15, 32);
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc });
             const pinBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            pinBody.position.y = 0.075; // Center the body
             
-            // Add the head and body to the pin group
             pin.add(pinHead);
             pin.add(pinBody);
             
-            // Initially hide the pin until it's placed
-            pin.visible = false;
-            
-            // Add the pin to the scene
+            pin.visible = false; // Initially hide the pin
             scene.add(pin);
         }
+
+        // Function to create the reticle (the target on the ground)
+        function createReticle() {
+            reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.05, 0.07, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial()
+            );
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+        }
         
-        // Function to place the pin at a random location
+        // Function to place the pin at the reticle's location
         function placePin() {
-            if (pin) {
-                // Generate random coordinates for placement
-                const x = (Math.random() - 0.5) * 4; // Random x between -2 and 2
-                const z = (Math.random() - 0.5) * 4 - 2; // Random z between -4 and 0 (in front of the user)
-                const y = 0; // Place it on the floor initially
-                
-                pin.position.set(x, y, z);
+            if (pin && reticle) {
+                // Set the pin's position from the reticle's matrix
+                pin.position.setFromMatrixPosition(reticle.matrix);
                 pin.visible = true;
-                console.log(`Pin placed at: x=${x.toFixed(2)}, y=${y.toFixed(2)}, z=${z.toFixed(2)}`);
+                // We only want to place one pin, so we can hide the reticle after placement.
+                reticle.visible = false; 
             }
         }
 
@@ -158,27 +167,61 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
         
-        // Render loop
-        function render() {
+        // Render loop, called every frame
+        function render(timestamp, frame) {
+            // The 'frame' object is available inside an XR session
+            if (frame) {
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+
+                // Request hit test source once the session starts
+                if (hitTestSourceRequested === false) {
+                    session.requestReferenceSpace('viewer').then(function (referenceSpace) {
+                        session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
+                            hitTestSource = source;
+                        });
+                    });
+                    // Set a flag so we don't request this again
+                    session.addEventListener('end', function () {
+                        hitTestSourceRequested = false;
+                        hitTestSource = null;
+                    });
+                    hitTestSourceRequested = true;
+                }
+
+                // If we have a hit test source, use it to find surfaces
+                if (hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    // If we found at least one surface
+                    if (hitTestResults.length) {
+                        const hit = hitTestResults[0];
+                        // Position the reticle at the intersection point
+                        reticle.visible = true;
+                        reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+                    } else {
+                        // If no surface is found, hide the reticle
+                        reticle.visible = false;
+                    }
+                }
+            }
             renderer.render(scene, camera);
         }
 
         // Start the application
         init();
 
-        // Place the pin once the XR session starts
+        // Handle session start and end events
         renderer.xr.addEventListener('sessionstart', () => {
             console.log('WebXR session started');
-            // Hide the info text when AR starts
             document.getElementById('info').style.display = 'none';
-            placePin();
         });
         
         renderer.xr.addEventListener('sessionend', () => {
             console.log('WebXR session ended');
-            // Show the info text when AR ends
             document.getElementById('info').style.display = 'block';
+            // Reset pin and reticle visibility for the next session
             pin.visible = false;
+            reticle.visible = true; 
         });
 
     </script>
