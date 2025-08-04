@@ -95,6 +95,7 @@
         let hitTestSource = null;
         let hitTestSourceRequested = false;
         let initialObjectPlaced = false; // Flag to check if the initial object is placed in AR
+        let wasOrientationEnabledBeforeAR = false; // Flag to remember motion control state
 
         const placedObjects = [];
 
@@ -122,6 +123,28 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             container.appendChild(renderer.domElement);
+
+            // --- Add listeners for session start/end to manage controls ---
+            renderer.xr.addEventListener('sessionstart', () => {
+                // Check if orientation controls were active before starting AR
+                if (orientationControls.enabled) {
+                    wasOrientationEnabledBeforeAR = true;
+                    orientationControls.enabled = false; // Disable them for the AR session
+                }
+                orientationButton.style.display = 'none';
+            });
+
+            renderer.xr.addEventListener('sessionend', () => {
+                // If motion controls were on before, re-enable them automatically
+                if (wasOrientationEnabledBeforeAR) {
+                    orientationControls.enabled = true;
+                    infoDiv.textContent = 'Motion controls re-enabled. Tilt your device to look around.';
+                    wasOrientationEnabledBeforeAR = false; // Reset the flag for the next cycle
+                } else {
+                    infoDiv.textContent = 'Welcome back! Enable motion controls or re-enter AR.';
+                }
+            });
+
 
             orientationControls = new DeviceOrientationControls(camera);
             orientationControls.enabled = false;
@@ -225,58 +248,55 @@
             const session = renderer.xr.getSession();
 
             if (session) { 
-                if (orientationControls.enabled) {
-                    orientationControls.enabled = false;
-                }
-                orientationButton.style.display = 'none';
+                 // AR-specific rendering logic
                 infoDiv.textContent = 'Point your camera at a surface...';
+
+                if (frame) {
+                    const referenceSpace = renderer.xr.getReferenceSpace();
+                    
+                    if (hitTestSourceRequested === false) {
+                        session.requestReferenceSpace('viewer').then((refSpace) => {
+                            session.requestHitTestSource({ space: refSpace }).then((source) => {
+                                hitTestSource = source;
+                            });
+                        });
+
+                        session.addEventListener('end', () => {
+                            hitTestSourceRequested = false;
+                            hitTestSource = null;
+                            initialObjectPlaced = false; // Reset for next session
+                            initialObject.position.set(0, 0, -3); // Reset for non-AR view
+                        });
+
+                        hitTestSourceRequested = true;
+                    }
+
+                    if (hitTestSource) {
+                        const hitTestResults = frame.getHitTestResults(hitTestSource);
+                        if (hitTestResults.length) {
+                            const hit = hitTestResults[0];
+                            
+                            // Place the initial object on the first detected surface
+                            if (!initialObjectPlaced) {
+                                initialObject.position.setFromMatrixPosition(hit.getPose(referenceSpace).transform.matrix);
+                                initialObjectPlaced = true;
+                                infoDiv.textContent = 'Initial object placed! You can now place more cubes.';
+                            }
+
+                            reticle.visible = true;
+                            reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+                        } else {
+                            reticle.visible = false;
+                        }
+                    }
+                }
             } else { 
+                // Non-AR rendering logic
                 if (orientationControls.enabled) {
                     orientationControls.update();
                 } else {
                     if (!orientationButton.disabled) {
                         orientationButton.style.display = 'block';
-                    }
-                }
-            }
-
-            if (frame) {
-                const referenceSpace = renderer.xr.getReferenceSpace();
-                
-                if (hitTestSourceRequested === false) {
-                    session.requestReferenceSpace('viewer').then((refSpace) => {
-                        session.requestHitTestSource({ space: refSpace }).then((source) => {
-                            hitTestSource = source;
-                        });
-                    });
-
-                    session.addEventListener('end', () => {
-                        hitTestSourceRequested = false;
-                        hitTestSource = null;
-                        initialObjectPlaced = false; // Reset for next session
-                        initialObject.position.set(0, 0, -3); // Reset for non-AR view
-                        infoDiv.textContent = 'Welcome back! Enable motion controls or re-enter AR.';
-                    });
-
-                    hitTestSourceRequested = true;
-                }
-
-                if (hitTestSource) {
-                    const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    if (hitTestResults.length) {
-                        const hit = hitTestResults[0];
-                        
-                        // Place the initial object on the first detected surface
-                        if (!initialObjectPlaced) {
-                            initialObject.position.setFromMatrixPosition(hit.getPose(referenceSpace).transform.matrix);
-                            initialObjectPlaced = true;
-                            infoDiv.textContent = 'Initial object placed! You can now place more cubes.';
-                        }
-
-                        reticle.visible = true;
-                        reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
-                    } else {
-                        reticle.visible = false;
                     }
                 }
             }
