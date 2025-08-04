@@ -52,7 +52,7 @@
 <body>
     <div id="info">
         <h1>WebXR Pin Collector</h1>
-        <p>Click "Start AR", find a flat surface, and tap the screen to place the pin!</p>
+        <p>Click "Start AR" and scan your area to find the randomly placed pin!</p>
     </div>
     <button id="ar-button">Start AR</button>
 
@@ -64,10 +64,11 @@
         import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/ARButton.js';
 
         let camera, scene, renderer;
-        let pin, reticle; // Reticle will show where the pin will be placed
+        let pin;
         let controller;
         let hitTestSource = null;
         let hitTestSourceRequested = false;
+        let pinPlaced = false; // Flag to track if the pin has been placed
 
         // Initialize the scene, camera, and renderer
         function init() {
@@ -93,29 +94,14 @@
             const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
             document.getElementById('ar-button').replaceWith(arButton);
 
-            // Set up the controller for user input (tapping)
-            controller = renderer.xr.getController(0);
-            controller.addEventListener('select', onSelect);
-            scene.add(controller);
-
-            // Create the objects for our scene
+            // Create the pin object
             createPin();
-            createReticle();
             
             // Set the animation loop
             renderer.setAnimationLoop(render);
 
             // Handle window resizing
             window.addEventListener('resize', onWindowResize, false);
-        }
-
-        // Function to handle the user tapping the screen
-        function onSelect() {
-            // Check if the reticle is currently visible (i.e., pointing at a surface)
-            if (reticle.visible) {
-                // Place the pin at the reticle's current position
-                placePin();
-            }
         }
 
         // Function to create the 3D pin
@@ -136,28 +122,6 @@
             
             pin.visible = false; // Initially hide the pin
             scene.add(pin);
-        }
-
-        // Function to create the reticle (the target on the ground)
-        function createReticle() {
-            reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.05, 0.07, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial()
-            );
-            reticle.matrixAutoUpdate = false;
-            reticle.visible = false;
-            scene.add(reticle);
-        }
-        
-        // Function to place the pin at the reticle's location
-        function placePin() {
-            if (pin && reticle) {
-                // Set the pin's position from the reticle's matrix
-                pin.position.setFromMatrixPosition(reticle.matrix);
-                pin.visible = true;
-                // We only want to place one pin, so we can hide the reticle after placement.
-                reticle.visible = false; 
-            }
         }
 
         // Handle window resize events
@@ -192,15 +156,23 @@
                 // If we have a hit test source, use it to find surfaces
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    // If we found at least one surface
-                    if (hitTestResults.length) {
+                    // If we found at least one surface AND the pin hasn't been placed yet
+                    if (hitTestResults.length > 0 && !pinPlaced) {
                         const hit = hitTestResults[0];
-                        // Position the reticle at the intersection point
-                        reticle.visible = true;
-                        reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
-                    } else {
-                        // If no surface is found, hide the reticle
-                        reticle.visible = false;
+                        const pose = hit.getPose(referenceSpace).transform;
+                        
+                        // Add a random offset to the placement to make it less predictable
+                        const randomX = (Math.random() - 0.5) * 4; // Random offset between -2m and 2m
+                        const randomZ = (Math.random() - 0.5) * 4; // Random offset between -2m and 2m
+
+                        pin.position.set(
+                            pose.position.x + randomX,
+                            pose.position.y, // Keep the detected ground height
+                            pose.position.z + randomZ
+                        );
+                        
+                        pin.visible = true;
+                        pinPlaced = true; // Set flag to true so we only place one pin per session
                     }
                 }
             }
@@ -219,9 +191,9 @@
         renderer.xr.addEventListener('sessionend', () => {
             console.log('WebXR session ended');
             document.getElementById('info').style.display = 'block';
-            // Reset pin and reticle visibility for the next session
+            // Reset pin and placement status for the next session
             pin.visible = false;
-            reticle.visible = true; 
+            pinPlaced = false; 
         });
 
     </script>
