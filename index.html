@@ -46,6 +46,26 @@
             width: 100%;
             height: 100%;
         }
+        /* Styles for the direction arrows */
+        .arrow {
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 48px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 15px;
+            display: none; /* Hidden by default */
+            z-index: 10;
+            user-select: none;
+        }
+        #left-arrow {
+            left: 10px;
+        }
+        #right-arrow {
+            right: 10px;
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
 </head>
@@ -56,7 +76,9 @@
     </div>
     <button id="ar-button">Start AR</button>
 
-    <!-- The necessary scripts are now imported as modules below -->
+    <!-- Arrow markers for guidance -->
+    <div id="left-arrow" class="arrow">&lt;</div>
+    <div id="right-arrow" class="arrow">&gt;</div>
 
     <script type="module">
         // Import THREE.js and ARButton as modules for reliability
@@ -65,42 +87,33 @@
 
         let camera, scene, renderer;
         let pin;
-        let controller;
         let hitTestSource = null;
         let hitTestSourceRequested = false;
         let pinPlaced = false; // Flag to track if the pin has been placed
 
+        // Get references to the arrow elements
+        const leftArrow = document.getElementById('left-arrow');
+        const rightArrow = document.getElementById('right-arrow');
+
         // Initialize the scene, camera, and renderer
         function init() {
-            // Create a new scene
             scene = new THREE.Scene();
-
-            // Set up the camera
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-
-            // Set up the renderer
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // Add lighting to the scene
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
-            // Create the AR button, requesting the 'hit-test' feature
             const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
             document.getElementById('ar-button').replaceWith(arButton);
 
-            // Create the pin object
             createPin();
-            
-            // Set the animation loop
             renderer.setAnimationLoop(render);
-
-            // Handle window resizing
             window.addEventListener('resize', onWindowResize, false);
         }
 
@@ -110,17 +123,17 @@
             const headGeometry = new THREE.SphereGeometry(0.05, 32, 32);
             const headMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
             const pinHead = new THREE.Mesh(headGeometry, headMaterial);
-            pinHead.position.y = 0.15; // Adjusted position for new body length
+            pinHead.position.y = 0.15;
             
             const bodyGeometry = new THREE.CylinderGeometry(0.01, 0.01, 0.15, 32);
             const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc });
             const pinBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
-            pinBody.position.y = 0.075; // Center the body
+            pinBody.position.y = 0.075;
             
             pin.add(pinHead);
             pin.add(pinBody);
             
-            pin.visible = false; // Initially hide the pin
+            pin.visible = false;
             scene.add(pin);
         }
 
@@ -133,19 +146,16 @@
         
         // Render loop, called every frame
         function render(timestamp, frame) {
-            // The 'frame' object is available inside an XR session
             if (frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
-                // Request hit test source once the session starts
                 if (hitTestSourceRequested === false) {
                     session.requestReferenceSpace('viewer').then(function (referenceSpace) {
                         session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
                             hitTestSource = source;
                         });
                     });
-                    // Set a flag so we don't request this again
                     session.addEventListener('end', function () {
                         hitTestSourceRequested = false;
                         hitTestSource = null;
@@ -153,27 +163,68 @@
                     hitTestSourceRequested = true;
                 }
 
-                // If we have a hit test source, use it to find surfaces
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    // If we found at least one surface AND the pin hasn't been placed yet
                     if (hitTestResults.length > 0 && !pinPlaced) {
                         const hit = hitTestResults[0];
                         const pose = hit.getPose(referenceSpace).transform;
                         
-                        // Add a random offset to the placement to make it less predictable
-                        const randomX = (Math.random() - 0.5) * 4; // Random offset between -2m and 2m
-                        const randomZ = (Math.random() - 0.5) * 4; // Random offset between -2m and 2m
+                        const randomX = (Math.random() - 0.5) * 4;
+                        const randomZ = (Math.random() - 0.5) * 4;
 
                         pin.position.set(
                             pose.position.x + randomX,
-                            pose.position.y, // Keep the detected ground height
+                            pose.position.y,
                             pose.position.z + randomZ
                         );
                         
                         pin.visible = true;
-                        pinPlaced = true; // Set flag to true so we only place one pin per session
+                        pinPlaced = true;
                     }
+                }
+
+                // --- Arrow Indicator Logic ---
+                if (pinPlaced && pin.visible) {
+                    // Get the 3D position of the pin in the world
+                    const pinWorldPosition = pin.getWorldPosition(new THREE.Vector3());
+                    
+                    // Transform the pin's position into the camera's local space.
+                    // This tells us where the pin is relative to the camera's orientation.
+                    const pinInCameraSpace = camera.worldToLocal(pinWorldPosition.clone());
+
+                    // If z is positive, the object is behind the camera.
+                    if (pinInCameraSpace.z > 0) {
+                        // Determine which way to turn (left or right)
+                        if (pinInCameraSpace.x > 0) {
+                            leftArrow.style.display = 'none';
+                            rightArrow.style.display = 'block';
+                        } else {
+                            leftArrow.style.display = 'block';
+                            rightArrow.style.display = 'none';
+                        }
+                    } else {
+                        // The pin is in front of the camera. Now check if it's on-screen.
+                        // Project the position to normalized screen coordinates (-1 to +1).
+                        const pinProjected = pinWorldPosition.clone().project(camera);
+
+                        if (pinProjected.x < -1) {
+                            // Off-screen to the left
+                            leftArrow.style.display = 'block';
+                            rightArrow.style.display = 'none';
+                        } else if (pinProjected.x > 1) {
+                            // Off-screen to the right
+                            leftArrow.style.display = 'none';
+                            rightArrow.style.display = 'block';
+                        } else {
+                            // On-screen, so hide the arrows
+                            leftArrow.style.display = 'none';
+                            rightArrow.style.display = 'none';
+                        }
+                    }
+                } else {
+                    // If pin is not placed, hide arrows.
+                    leftArrow.style.display = 'none';
+                    rightArrow.style.display = 'none';
                 }
             }
             renderer.render(scene, camera);
@@ -191,9 +242,10 @@
         renderer.xr.addEventListener('sessionend', () => {
             console.log('WebXR session ended');
             document.getElementById('info').style.display = 'block';
-            // Reset pin and placement status for the next session
             pin.visible = false;
             pinPlaced = false; 
+            leftArrow.style.display = 'none';
+            rightArrow.style.display = 'none';
         });
 
     </script>
