@@ -16,8 +16,7 @@
             height: 100vh;
             flex-direction: column;
         }
-        /* This style is now targeting the button created by ARButton.js */
-        #ar-button {
+        .ar-button {
             position: absolute;
             bottom: 20px;
             left: 50%;
@@ -33,10 +32,10 @@
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
             z-index: 12; /* Ensure button is on top */
         }
-        #ar-button:hover {
+        .ar-button:hover {
             background-color: #357ABD;
         }
-        #ar-button:active {
+        .ar-button:active {
             transform: scale(0.98);
         }
         #info {
@@ -52,17 +51,15 @@
             width: 100%;
             height: 100%;
         }
-        /* New container for all overlay elements */
         #overlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            pointer-events: none; /* Allow clicks to pass through to the canvas */
+            pointer-events: none;
             z-index: 1;
         }
-        /* Styles for the direction arrows */
         .arrow {
             position: fixed;
             top: 50%;
@@ -72,7 +69,7 @@
             background-color: rgba(0, 0, 0, 0.5);
             padding: 10px 20px;
             border-radius: 15px;
-            display: none; /* Hidden by default */
+            display: none;
             z-index: 10;
             user-select: none;
         }
@@ -82,7 +79,6 @@
         #right-arrow {
             right: 10px;
         }
-        /* Style for the tooltip */
         #tooltip {
             position: fixed;
             top: 20px;
@@ -94,6 +90,16 @@
             border-radius: 20px;
             font-size: 16px;
             z-index: 11;
+            display: none;
+        }
+        /* Custom Exit button in the overlay */
+        #exit-ar-button {
+            pointer-events: auto; /* Make this button clickable */
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #E24A4A;
             display: none; /* Hidden by default */
         }
     </style>
@@ -104,36 +110,35 @@
         <h1>WebXR Pin Collector</h1>
         <p>Click "Start AR" and scan your area to find the randomly placed pin!</p>
     </div>
-    <!-- This button is a placeholder and will be replaced by ARButton.js -->
-    <button id="ar-button">Start AR</button>
+    <!-- Our own custom Start AR button -->
+    <button id="start-ar-button" class="ar-button">Start AR</button>
 
     <!-- Container for all DOM overlay elements -->
     <div id="overlay">
-        <!-- Arrow markers for guidance -->
         <div id="left-arrow" class="arrow">&lt;</div>
         <div id="right-arrow" class="arrow">&gt;</div>
-        
-        <!-- Tooltip message -->
         <div id="tooltip">Rotate around to find the pin!</div>
+        <!-- Our own custom Exit AR button -->
+        <button id="exit-ar-button" class="ar-button">Exit AR</button>
     </div>
 
     <script type="module">
-        // Import THREE.js and ARButton as modules for reliability
+        // Import THREE.js but we will not import ARButton anymore
         import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js';
-        import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/webxr/ARButton.js';
 
         let camera, scene, renderer;
         let pin;
         let hitTestSource = null;
         let hitTestSourceRequested = false;
-        let pinPlaced = false; // Flag to track if the pin has been placed
+        let pinPlaced = false;
+        let currentSession = null;
 
-        // Get references to the UI elements
         const leftArrow = document.getElementById('left-arrow');
         const rightArrow = document.getElementById('right-arrow');
         const tooltip = document.getElementById('tooltip');
+        const startButton = document.getElementById('start-ar-button');
+        const exitButton = document.getElementById('exit-ar-button');
 
-        // Initialize the scene, camera, and renderer
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
@@ -147,22 +152,80 @@
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
-            // Configure ARButton with the dom-overlay feature
-            const arButton = ARButton.createButton(renderer, { 
-                requiredFeatures: ['hit-test', 'dom-overlay'],
-                domOverlay: { root: document.getElementById('overlay') } 
-            });
-            // The ARButton script replaces the button, so we apply the ID to the new one for styling.
-            arButton.id = 'ar-button'; 
-            document.body.replaceChild(arButton, document.getElementById('ar-button'));
-
+            // Check for WebXR support and set up the start button
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.getElementById('overlay') } }).then((supported) => {
+                    if (supported) {
+                        startButton.addEventListener('click', onStartAR);
+                    } else {
+                        startButton.textContent = "AR Not Supported";
+                        startButton.disabled = true;
+                    }
+                });
+            } else {
+                startButton.textContent = "AR Not Available";
+                startButton.disabled = true;
+            }
+            
+            // Set up the exit button
+            exitButton.addEventListener('click', onEndAR);
 
             createPin();
             renderer.setAnimationLoop(render);
             window.addEventListener('resize', onWindowResize, false);
         }
 
-        // Function to create the 3D pin
+        // Function to start the AR session
+        async function onStartAR() {
+            try {
+                const session = await navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['hit-test', 'dom-overlay'],
+                    domOverlay: { root: document.getElementById('overlay') }
+                });
+                onSessionStarted(session);
+            } catch (e) {
+                console.error("Failed to start AR session:", e);
+            }
+        }
+
+        // Function to handle session start
+        function onSessionStarted(session) {
+            currentSession = session;
+            session.addEventListener('end', onSessionEnded);
+            renderer.xr.setReferenceSpaceType('local');
+            renderer.xr.setSession(session);
+            
+            // Update UI for active session
+            startButton.style.display = 'none';
+            exitButton.style.display = 'block';
+            document.getElementById('info').style.display = 'none';
+        }
+
+        // Function to end the AR session
+        function onEndAR() {
+            if (currentSession) {
+                currentSession.end();
+            }
+        }
+
+        // Function to handle session end
+        function onSessionEnded() {
+            currentSession.removeEventListener('end', onSessionEnded);
+            currentSession = null;
+            
+            // Reset UI
+            startButton.style.display = 'block';
+            exitButton.style.display = 'none';
+            document.getElementById('info').style.display = 'block';
+
+            // Reset game state
+            pin.visible = false;
+            pinPlaced = false; 
+            leftArrow.style.display = 'none';
+            rightArrow.style.display = 'none';
+            tooltip.style.display = 'none';
+        }
+
         function createPin() {
             pin = new THREE.Group();
             const headGeometry = new THREE.SphereGeometry(0.05, 32, 32);
@@ -182,14 +245,12 @@
             scene.add(pin);
         }
 
-        // Handle window resize events
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
         
-        // Render loop, called every frame
         function render(timestamp, frame) {
             if (frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
@@ -226,16 +287,13 @@
                         pin.visible = true;
                         pinPlaced = true;
 
-                        // Show the tooltip when the pin is first placed
                         tooltip.style.display = 'block';
-                        // Hide it after 5 seconds
                         setTimeout(() => {
                             tooltip.style.display = 'none';
                         }, 5000);
                     }
                 }
 
-                // --- Arrow Indicator Logic ---
                 if (pinPlaced && pin.visible) {
                     const pinWorldPosition = pin.getWorldPosition(new THREE.Vector3());
                     const pinInCameraSpace = camera.worldToLocal(pinWorldPosition.clone());
@@ -271,22 +329,6 @@
 
         // Start the application
         init();
-
-        // Handle session start and end events
-        renderer.xr.addEventListener('sessionstart', () => {
-            console.log('WebXR session started');
-            document.getElementById('info').style.display = 'none';
-        });
-        
-        renderer.xr.addEventListener('sessionend', () => {
-            console.log('WebXR session ended');
-            document.getElementById('info').style.display = 'block';
-            pin.visible = false;
-            pinPlaced = false; 
-            leftArrow.style.display = 'none';
-            rightArrow.style.display = 'none';
-            tooltip.style.display = 'none';
-        });
 
     </script>
 </body>
