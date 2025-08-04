@@ -92,8 +92,8 @@
             z-index: 11;
             display: none;
         }
-        /* Custom Exit button in the overlay */
-        #exit-ar-button {
+        /* Custom button in the overlay to hide/show AR */
+        #toggle-ar-button {
             pointer-events: auto; /* Make this button clickable */
             position: absolute;
             bottom: 20px;
@@ -118,12 +118,12 @@
         <div id="left-arrow" class="arrow">&lt;</div>
         <div id="right-arrow" class="arrow">&gt;</div>
         <div id="tooltip">Rotate around to find the pin!</div>
-        <!-- Our own custom Exit AR button -->
-        <button id="exit-ar-button" class="ar-button">Exit AR</button>
+        <!-- Our own custom button to hide/show the AR view -->
+        <button id="toggle-ar-button" class="ar-button">Hide AR</button>
     </div>
 
     <script type="module">
-        // Import THREE.js but we will not import ARButton anymore
+        // Import THREE.js
         import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js';
 
         let camera, scene, renderer;
@@ -132,12 +132,13 @@
         let hitTestSourceRequested = false;
         let pinPlaced = false;
         let currentSession = null;
+        let isARVisible = true; // State to track if the AR view is visible
 
         const leftArrow = document.getElementById('left-arrow');
         const rightArrow = document.getElementById('right-arrow');
         const tooltip = document.getElementById('tooltip');
         const startButton = document.getElementById('start-ar-button');
-        const exitButton = document.getElementById('exit-ar-button');
+        const toggleButton = document.getElementById('toggle-ar-button');
 
         function init() {
             scene = new THREE.Scene();
@@ -167,8 +168,8 @@
                 startButton.disabled = true;
             }
             
-            // Set up the exit button
-            exitButton.addEventListener('click', onEndAR);
+            // Set up the hide/show button
+            toggleButton.addEventListener('click', toggleARVisibility);
 
             createPin();
             renderer.setAnimationLoop(render);
@@ -197,26 +198,43 @@
             
             // Update UI for active session
             startButton.style.display = 'none';
-            exitButton.style.display = 'block';
+            toggleButton.style.display = 'block';
+            toggleButton.textContent = 'Hide AR';
             document.getElementById('info').style.display = 'none';
+            isARVisible = true;
+            renderer.domElement.style.visibility = 'visible';
         }
 
-        // Function to end the AR session
-        function onEndAR() {
-            if (currentSession) {
-                currentSession.end();
+        // Function to toggle the visibility of the AR view
+        function toggleARVisibility() {
+            isARVisible = !isARVisible;
+            if (isARVisible) {
+                // Show the AR view
+                renderer.domElement.style.visibility = 'visible';
+                toggleButton.textContent = 'Hide AR';
+            } else {
+                // Hide the AR view
+                renderer.domElement.style.visibility = 'hidden';
+                // Hide arrows and tooltip as well
+                leftArrow.style.display = 'none';
+                rightArrow.style.display = 'none';
+                tooltip.style.display = 'none';
+                toggleButton.textContent = 'Show AR';
             }
         }
 
-        // Function to handle session end
+        // Function to handle session end (e.g., from browser UI)
         function onSessionEnded() {
             currentSession.removeEventListener('end', onSessionEnded);
             currentSession = null;
             
             // Reset UI
             startButton.style.display = 'block';
-            exitButton.style.display = 'none';
+            toggleButton.style.display = 'none';
             document.getElementById('info').style.display = 'block';
+
+            // Ensure canvas is visible for next session
+            renderer.domElement.style.visibility = 'visible';
 
             // Reset game state
             pin.visible = false;
@@ -252,7 +270,8 @@
         }
         
         function render(timestamp, frame) {
-            if (frame) {
+            // Only render the scene if the session is active and visible
+            if (frame && isARVisible) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
