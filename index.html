@@ -16,7 +16,12 @@
             height: 100vh;
             flex-direction: column;
         }
+        /* This style is now targeting the button created by ARButton.js */
         #ar-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
             background-color: #4A90E2;
             color: white;
             border: none;
@@ -26,6 +31,7 @@
             cursor: pointer;
             transition: background-color 0.3s, transform 0.1s;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            z-index: 12; /* Ensure button is on top */
         }
         #ar-button:hover {
             background-color: #357ABD;
@@ -98,6 +104,7 @@
         <h1>WebXR Pin Collector</h1>
         <p>Click "Start AR" and scan your area to find the randomly placed pin!</p>
     </div>
+    <!-- This button is a placeholder and will be replaced by ARButton.js -->
     <button id="ar-button">Start AR</button>
 
     <!-- Container for all DOM overlay elements -->
@@ -145,7 +152,10 @@
                 requiredFeatures: ['hit-test', 'dom-overlay'],
                 domOverlay: { root: document.getElementById('overlay') } 
             });
-            document.getElementById('ar-button').replaceWith(arButton);
+            // The ARButton script replaces the button, so we apply the ID to the new one for styling.
+            arButton.id = 'ar-button'; 
+            document.body.replaceChild(arButton, document.getElementById('ar-button'));
+
 
             createPin();
             renderer.setAnimationLoop(render);
