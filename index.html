@@ -270,7 +270,7 @@
         }
         
         function render(timestamp, frame) {
-            // Only render the scene if the session is active and visible
+            // Only render the scene if the session is active and the view is visible
             if (frame && isARVisible) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
@@ -342,8 +342,12 @@
                     leftArrow.style.display = 'none';
                     rightArrow.style.display = 'none';
                 }
+                // The render call is now inside the conditional block
+                renderer.render(scene, camera);
+            } else if (!frame) {
+                // If not in an AR session, render normally.
+                renderer.render(scene, camera);
             }
-            renderer.render(scene, camera);
         }
 
         // Start the application
