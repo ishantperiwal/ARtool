@@ -66,6 +66,20 @@
         #right-arrow {
             right: 10px;
         }
+        /* Style for the tooltip */
+        #tooltip {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 16px;
+            z-index: 11;
+            display: none; /* Hidden by default */
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
 </head>
@@ -79,6 +93,9 @@
     <!-- Arrow markers for guidance -->
     <div id="left-arrow" class="arrow">&lt;</div>
     <div id="right-arrow" class="arrow">&gt;</div>
+    
+    <!-- Tooltip message -->
+    <div id="tooltip">Rotate around to find the pin!</div>
 
     <script type="module">
         // Import THREE.js and ARButton as modules for reliability
@@ -91,9 +108,10 @@
         let hitTestSourceRequested = false;
         let pinPlaced = false; // Flag to track if the pin has been placed
 
-        // Get references to the arrow elements
+        // Get references to the UI elements
         const leftArrow = document.getElementById('left-arrow');
         const rightArrow = document.getElementById('right-arrow');
+        const tooltip = document.getElementById('tooltip');
 
         // Initialize the scene, camera, and renderer
         function init() {
@@ -180,21 +198,22 @@
                         
                         pin.visible = true;
                         pinPlaced = true;
+
+                        // Show the tooltip when the pin is first placed
+                        tooltip.style.display = 'block';
+                        // Hide it after 5 seconds
+                        setTimeout(() => {
+                            tooltip.style.display = 'none';
+                        }, 5000);
                     }
                 }
 
                 // --- Arrow Indicator Logic ---
                 if (pinPlaced && pin.visible) {
-                    // Get the 3D position of the pin in the world
                     const pinWorldPosition = pin.getWorldPosition(new THREE.Vector3());
-                    
-                    // Transform the pin's position into the camera's local space.
-                    // This tells us where the pin is relative to the camera's orientation.
                     const pinInCameraSpace = camera.worldToLocal(pinWorldPosition.clone());
 
-                    // If z is positive, the object is behind the camera.
                     if (pinInCameraSpace.z > 0) {
-                        // Determine which way to turn (left or right)
                         if (pinInCameraSpace.x > 0) {
                             leftArrow.style.display = 'none';
                             rightArrow.style.display = 'block';
@@ -203,26 +222,19 @@
                             rightArrow.style.display = 'none';
                         }
                     } else {
-                        // The pin is in front of the camera. Now check if it's on-screen.
-                        // Project the position to normalized screen coordinates (-1 to +1).
                         const pinProjected = pinWorldPosition.clone().project(camera);
-
                         if (pinProjected.x < -1) {
-                            // Off-screen to the left
                             leftArrow.style.display = 'block';
                             rightArrow.style.display = 'none';
                         } else if (pinProjected.x > 1) {
-                            // Off-screen to the right
                             leftArrow.style.display = 'none';
                             rightArrow.style.display = 'block';
                         } else {
-                            // On-screen, so hide the arrows
                             leftArrow.style.display = 'none';
                             rightArrow.style.display = 'none';
                         }
                     }
                 } else {
-                    // If pin is not placed, hide arrows.
                     leftArrow.style.display = 'none';
                     rightArrow.style.display = 'none';
                 }
@@ -246,6 +258,7 @@
             pinPlaced = false; 
             leftArrow.style.display = 'none';
             rightArrow.style.display = 'none';
+            tooltip.style.display = 'none';
         });
 
     </script>
