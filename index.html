@@ -45,11 +45,16 @@
             border-radius: 12px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
             text-align: center;
+            z-index: 2; /* Make sure info is on top of hidden canvas */
+            position: relative;
         }
         canvas {
-            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
+            z-index: 0; /* Default z-index */
         }
         #overlay {
             position: fixed;
@@ -139,6 +144,7 @@
         const tooltip = document.getElementById('tooltip');
         const startButton = document.getElementById('start-ar-button');
         const toggleButton = document.getElementById('toggle-ar-button');
+        const infoDiv = document.getElementById('info');
 
         function init() {
             scene = new THREE.Scene();
@@ -200,21 +206,23 @@
             startButton.style.display = 'none';
             toggleButton.style.display = 'block';
             toggleButton.textContent = 'Hide AR';
-            document.getElementById('info').style.display = 'none';
+            infoDiv.style.display = 'none';
             isARVisible = true;
-            renderer.domElement.style.visibility = 'visible';
+            renderer.domElement.style.zIndex = '0';
         }
 
         // Function to toggle the visibility of the AR view
         function toggleARVisibility() {
             isARVisible = !isARVisible;
             if (isARVisible) {
-                // Show the AR view
-                renderer.domElement.style.visibility = 'visible';
+                // Show the AR view by bringing it to the front
+                renderer.domElement.style.zIndex = '0';
+                infoDiv.style.display = 'none';
                 toggleButton.textContent = 'Hide AR';
             } else {
-                // Hide the AR view
-                renderer.domElement.style.visibility = 'hidden';
+                // Hide the AR view by sending it to the back
+                renderer.domElement.style.zIndex = '-1';
+                infoDiv.style.display = 'block';
                 // Hide arrows and tooltip as well
                 leftArrow.style.display = 'none';
                 rightArrow.style.display = 'none';
@@ -231,10 +239,10 @@
             // Reset UI
             startButton.style.display = 'block';
             toggleButton.style.display = 'none';
-            document.getElementById('info').style.display = 'block';
+            infoDiv.style.display = 'block';
 
-            // Ensure canvas is visible for next session
-            renderer.domElement.style.visibility = 'visible';
+            // Ensure canvas is in a visible layer for next session
+            renderer.domElement.style.zIndex = '0';
 
             // Reset game state
             pin.visible = false;
@@ -270,81 +278,84 @@
         }
         
         function render(timestamp, frame) {
-            // Only render the scene if the session is active and the view is visible
-            if (frame && isARVisible) {
-                const referenceSpace = renderer.xr.getReferenceSpace();
-                const session = renderer.xr.getSession();
+            // The rendering continues, but the canvas z-index determines visibility
+            if (frame) {
+                // Only run hit-test and arrow logic if the AR view is meant to be visible
+                if (isARVisible) {
+                    const referenceSpace = renderer.xr.getReferenceSpace();
+                    const session = renderer.xr.getSession();
 
-                if (hitTestSourceRequested === false) {
-                    session.requestReferenceSpace('viewer').then(function (referenceSpace) {
-                        session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
-                            hitTestSource = source;
+                    if (hitTestSourceRequested === false) {
+                        session.requestReferenceSpace('viewer').then(function (referenceSpace) {
+                            session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
+                                hitTestSource = source;
+                            });
                         });
-                    });
-                    session.addEventListener('end', function () {
-                        hitTestSourceRequested = false;
-                        hitTestSource = null;
-                    });
-                    hitTestSourceRequested = true;
-                }
-
-                if (hitTestSource) {
-                    const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    if (hitTestResults.length > 0 && !pinPlaced) {
-                        const hit = hitTestResults[0];
-                        const pose = hit.getPose(referenceSpace).transform;
-                        
-                        const randomX = (Math.random() - 0.5) * 4;
-                        const randomZ = (Math.random() - 0.5) * 4;
-
-                        pin.position.set(
-                            pose.position.x + randomX,
-                            pose.position.y,
-                            pose.position.z + randomZ
-                        );
-                        
-                        pin.visible = true;
-                        pinPlaced = true;
-
-                        tooltip.style.display = 'block';
-                        setTimeout(() => {
-                            tooltip.style.display = 'none';
-                        }, 5000);
+                        session.addEventListener('end', function () {
+                            hitTestSourceRequested = false;
+                            hitTestSource = null;
+                        });
+                        hitTestSourceRequested = true;
                     }
-                }
 
-                if (pinPlaced && pin.visible) {
-                    const pinWorldPosition = pin.getWorldPosition(new THREE.Vector3());
-                    const pinInCameraSpace = camera.worldToLocal(pinWorldPosition.clone());
+                    if (hitTestSource) {
+                        const hitTestResults = frame.getHitTestResults(hitTestSource);
+                        if (hitTestResults.length > 0 && !pinPlaced) {
+                            const hit = hitTestResults[0];
+                            const pose = hit.getPose(referenceSpace).transform;
+                            
+                            const randomX = (Math.random() - 0.5) * 4;
+                            const randomZ = (Math.random() - 0.5) * 4;
 
-                    if (pinInCameraSpace.z > 0) {
-                        if (pinInCameraSpace.x > 0) {
-                            leftArrow.style.display = 'none';
-                            rightArrow.style.display = 'block';
+                            pin.position.set(
+                                pose.position.x + randomX,
+                                pose.position.y,
+                                pose.position.z + randomZ
+                            );
+                            
+                            pin.visible = true;
+                            pinPlaced = true;
+
+                            tooltip.style.display = 'block';
+                            setTimeout(() => {
+                                tooltip.style.display = 'none';
+                            }, 5000);
+                        }
+                    }
+
+                    if (pinPlaced && pin.visible) {
+                        const pinWorldPosition = pin.getWorldPosition(new THREE.Vector3());
+                        const pinInCameraSpace = camera.worldToLocal(pinWorldPosition.clone());
+
+                        if (pinInCameraSpace.z > 0) {
+                            if (pinInCameraSpace.x > 0) {
+                                leftArrow.style.display = 'none';
+                                rightArrow.style.display = 'block';
+                            } else {
+                                leftArrow.style.display = 'block';
+                                rightArrow.style.display = 'none';
+                            }
                         } else {
-                            leftArrow.style.display = 'block';
-                            rightArrow.style.display = 'none';
+                            const pinProjected = pinWorldPosition.clone().project(camera);
+                            if (pinProjected.x < -1) {
+                                leftArrow.style.display = 'block';
+                                rightArrow.style.display = 'none';
+                            } else if (pinProjected.x > 1) {
+                                leftArrow.style.display = 'none';
+                                rightArrow.style.display = 'block';
+                            } else {
+                                leftArrow.style.display = 'none';
+                                rightArrow.style.display = 'none';
+                            }
                         }
                     } else {
-                        const pinProjected = pinWorldPosition.clone().project(camera);
-                        if (pinProjected.x < -1) {
-                            leftArrow.style.display = 'block';
-                            rightArrow.style.display = 'none';
-                        } else if (pinProjected.x > 1) {
-                            leftArrow.style.display = 'none';
-                            rightArrow.style.display = 'block';
-                        } else {
-                            leftArrow.style.display = 'none';
-                            rightArrow.style.display = 'none';
-                        }
+                        leftArrow.style.display = 'none';
+                        rightArrow.style.display = 'none';
                     }
-                } else {
-                    leftArrow.style.display = 'none';
-                    rightArrow.style.display = 'none';
                 }
-                // The render call is now inside the conditional block
+                // Always render the scene to keep the camera feed active
                 renderer.render(scene, camera);
-            } else if (!frame) {
+            } else {
                 // If not in an AR session, render normally.
                 renderer.render(scene, camera);
             }
