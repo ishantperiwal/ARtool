@@ -15,6 +15,7 @@
             align-items: center;
             height: 100vh;
             flex-direction: column;
+            overflow: hidden; /* Prevent scrollbars */
         }
         .ar-button {
             position: absolute;
@@ -38,14 +39,18 @@
         .ar-button:active {
             transform: scale(0.98);
         }
+        #info-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
         #info {
-            margin-top: 20px;
             padding: 15px;
             background-color: white;
             border-radius: 12px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
             text-align: center;
-            z-index: 2; /* Make sure info is on top of hidden canvas */
             position: relative;
         }
         canvas {
@@ -54,7 +59,6 @@
             left: 0;
             width: 100%;
             height: 100%;
-            z-index: 0; /* Default z-index */
         }
         #overlay {
             position: fixed;
@@ -64,6 +68,19 @@
             height: 100%;
             pointer-events: none;
             z-index: 1;
+        }
+        /* New curtain element to reliably hide the AR view */
+        #curtain {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #f0f0f0;
+            z-index: 2;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
         .arrow {
             position: fixed;
@@ -97,7 +114,6 @@
             z-index: 11;
             display: none;
         }
-        /* Custom button in the overlay to hide/show AR */
         #toggle-ar-button {
             pointer-events: auto; /* Make this button clickable */
             position: absolute;
@@ -111,20 +127,25 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div id="info">
-        <h1>WebXR Pin Collector</h1>
-        <p>Click "Start AR" and scan your area to find the randomly placed pin!</p>
+    <!-- The curtain covers the screen when AR is "hidden" -->
+    <div id="curtain">
+        <div id="info-container">
+            <div id="info">
+                <h1>WebXR Pin Collector</h1>
+                <p>Click "Start AR" and scan your area to find the randomly placed pin!</p>
+            </div>
+        </div>
     </div>
-    <!-- Our own custom Start AR button -->
+    
+    <!-- Buttons are outside the curtain to always be controllable -->
     <button id="start-ar-button" class="ar-button">Start AR</button>
+    <button id="toggle-ar-button" class="ar-button">Hide AR</button>
 
     <!-- Container for all DOM overlay elements -->
     <div id="overlay">
         <div id="left-arrow" class="arrow">&lt;</div>
         <div id="right-arrow" class="arrow">&gt;</div>
         <div id="tooltip">Rotate around to find the pin!</div>
-        <!-- Our own custom button to hide/show the AR view -->
-        <button id="toggle-ar-button" class="ar-button">Hide AR</button>
     </div>
 
     <script type="module">
@@ -137,14 +158,14 @@
         let hitTestSourceRequested = false;
         let pinPlaced = false;
         let currentSession = null;
-        let isARVisible = true; // State to track if the AR view is visible
+        let isARVisible = true;
 
         const leftArrow = document.getElementById('left-arrow');
         const rightArrow = document.getElementById('right-arrow');
         const tooltip = document.getElementById('tooltip');
         const startButton = document.getElementById('start-ar-button');
         const toggleButton = document.getElementById('toggle-ar-button');
-        const infoDiv = document.getElementById('info');
+        const curtain = document.getElementById('curtain');
 
         function init() {
             scene = new THREE.Scene();
@@ -159,7 +180,6 @@
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
-            // Check for WebXR support and set up the start button
             if ('xr' in navigator) {
                 navigator.xr.isSessionSupported('immersive-ar', { requiredFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.getElementById('overlay') } }).then((supported) => {
                     if (supported) {
@@ -174,15 +194,17 @@
                 startButton.disabled = true;
             }
             
-            // Set up the hide/show button
             toggleButton.addEventListener('click', toggleARVisibility);
 
             createPin();
             renderer.setAnimationLoop(render);
             window.addEventListener('resize', onWindowResize, false);
+            
+            // Initially, the curtain is visible, hiding the uninitialized canvas.
+            curtain.style.display = 'flex';
+            toggleButton.style.display = 'none';
         }
 
-        // Function to start the AR session
         async function onStartAR() {
             try {
                 const session = await navigator.xr.requestSession('immersive-ar', {
@@ -195,34 +217,28 @@
             }
         }
 
-        // Function to handle session start
         function onSessionStarted(session) {
             currentSession = session;
             session.addEventListener('end', onSessionEnded);
             renderer.xr.setReferenceSpaceType('local');
             renderer.xr.setSession(session);
             
-            // Update UI for active session
             startButton.style.display = 'none';
             toggleButton.style.display = 'block';
             toggleButton.textContent = 'Hide AR';
-            infoDiv.style.display = 'none';
+            curtain.style.display = 'none'; // Hide curtain to reveal AR
             isARVisible = true;
-            renderer.domElement.style.zIndex = '0';
         }
 
-        // Function to toggle the visibility of the AR view
         function toggleARVisibility() {
             isARVisible = !isARVisible;
             if (isARVisible) {
-                // Show the AR view by bringing it to the front
-                renderer.domElement.style.zIndex = '0';
-                infoDiv.style.display = 'none';
+                // Show the AR view by hiding the curtain
+                curtain.style.display = 'none';
                 toggleButton.textContent = 'Hide AR';
             } else {
-                // Hide the AR view by sending it to the back
-                renderer.domElement.style.zIndex = '-1';
-                infoDiv.style.display = 'block';
+                // Hide the AR view by showing the curtain
+                curtain.style.display = 'flex';
                 // Hide arrows and tooltip as well
                 leftArrow.style.display = 'none';
                 rightArrow.style.display = 'none';
@@ -231,20 +247,14 @@
             }
         }
 
-        // Function to handle session end (e.g., from browser UI)
         function onSessionEnded() {
             currentSession.removeEventListener('end', onSessionEnded);
             currentSession = null;
             
-            // Reset UI
             startButton.style.display = 'block';
             toggleButton.style.display = 'none';
-            infoDiv.style.display = 'block';
+            curtain.style.display = 'flex'; // Show curtain on session end
 
-            // Ensure canvas is in a visible layer for next session
-            renderer.domElement.style.zIndex = '0';
-
-            // Reset game state
             pin.visible = false;
             pinPlaced = false; 
             leftArrow.style.display = 'none';
@@ -278,9 +288,7 @@
         }
         
         function render(timestamp, frame) {
-            // The rendering continues, but the canvas z-index determines visibility
             if (frame) {
-                // Only run hit-test and arrow logic if the AR view is meant to be visible
                 if (isARVisible) {
                     const referenceSpace = renderer.xr.getReferenceSpace();
                     const session = renderer.xr.getSession();
@@ -353,15 +361,12 @@
                         rightArrow.style.display = 'none';
                     }
                 }
-                // Always render the scene to keep the camera feed active
                 renderer.render(scene, camera);
             } else {
-                // If not in an AR session, render normally.
                 renderer.render(scene, camera);
             }
         }
 
-        // Start the application
         init();
 
     </script>
