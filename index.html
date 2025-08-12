@@ -208,7 +208,7 @@
             // We scale the blip's distance from the center.
             // Let's say anything over 1km is at the edge.
             const radarRadius = blip.parentElement.offsetWidth / 2;
-            const maxDistanceForScale = 1; // 1 km
+            const maxDistanceForScale = 0.01; // 1 km
             const distanceRatio = Math.min(distance, maxDistanceForScale) / maxDistanceForScale;
             const blipRadius = radarRadius * distanceRatio * 0.9; // * 0.9 to keep it inside the border
 
