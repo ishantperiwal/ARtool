@@ -58,6 +58,12 @@
             padding: 1rem;
             border-radius: 8px;
         }
+        #bypass-button {
+            margin-top: 15px;
+            background-color: #6c757d;
+            font-size: 16px;
+            padding: 10px 20px;
+        }
         canvas {
             position: absolute;
             top: 0;
@@ -124,10 +130,8 @@
             background-color: #E24A4A;
             display: none;
         }
-
-        /* --- New Radar Styles --- */
         #radar-container {
-            display: none; /* Hidden by default */
+            display: none;
             flex-direction: column;
             align-items: center;
             gap: 20px;
@@ -197,6 +201,7 @@
             <div id="info">
                 <h1>WebXR Pin Collector</h1>
                 <p>Waiting for data from parent application...</p>
+                <button id="bypass-button" class="ar-button">Play with Test Data</button>
             </div>
         </div>
         <div id="radar-container">
@@ -230,7 +235,7 @@
         let isARVisible = true;
         let raycaster;
 
-        // --- New Radar State ---
+        // --- Radar State ---
         const TARGET_RADIUS_METERS = 10;
         const ACTIVATION_RADIUS_METERS = 2;
         let userLocation = null;
@@ -251,6 +256,7 @@
         const radarNeedle = document.getElementById('radar-needle');
         const activationButton = document.getElementById('ar-activation-button');
         const distanceInfo = document.getElementById('distance-info');
+        const bypassButton = document.getElementById('bypass-button');
 
         // --- MAIN INITIALIZATION ---
         function init() {
@@ -272,11 +278,14 @@
             renderer.setAnimationLoop(render);
             window.addEventListener('resize', onWindowResize, false);
             
+            // Listen for the bypass button click
+            bypassButton.addEventListener('click', beginRadarGame);
+
             // Listen for data from the parent app
             window.addEventListener('message', (event) => {
                 if (event.origin !== window.location.origin) return;
                 infoText.textContent = `Tap screen to begin search for:\n${JSON.stringify(event.data.title, null, 2)}`;
-                // Use a single click on the body to start the permission requests
+                bypassButton.style.display = 'none'; // Hide bypass button when real data is loaded
                 document.body.addEventListener('click', beginRadarGame, { once: true });
             });
         }
@@ -308,6 +317,8 @@
         function handleOrientation(event) {
             deviceHeading = event.webkitCompassHeading || event.alpha;
         }
+
+
 
         function setupInitialState(position) {
             userLocation = position.coords;
@@ -345,8 +356,8 @@
         // --- WEBXR AR LOGIC ---
 
         async function onStartAR() {
-            radarContainer.style.display = 'none'; // Hide radar
-            curtain.style.display = 'none'; // Hide curtain
+            radarContainer.style.display = 'none';
+            curtain.style.display = 'none';
 
             try {
                 const session = await navigator.xr.requestSession('immersive-ar', {
@@ -379,7 +390,6 @@
                 if (intersects.length > 0) {
                     window.parent.postMessage('AR_ACTIVITY_COMPLETE', window.location.origin);
                     pin.visible = false;
-                    // End the session after a successful tap
                     setTimeout(() => currentSession.end(), 500);
                 }
             }
@@ -408,7 +418,7 @@
             
             toggleButton.style.display = 'none';
             curtain.style.display = 'flex';
-            infoContainer.style.display = 'block'; // Show info again
+            infoContainer.style.display = 'block';
             infoText.textContent = "Session Ended. Thanks for playing!";
 
             pin.visible = false;
@@ -483,7 +493,7 @@
                     const pinWorldPosition = pin.getWorldPosition(new THREE.Vector3());
                     const pinInCameraSpace = camera.worldToLocal(pinWorldPosition.clone());
 
-                    if (pinInCameraSpace.z > 0) { // If pin is behind the camera
+                    if (pinInCameraSpace.z > 0) { 
                         if (pinInCameraSpace.x > 0) {
                             leftArrow.style.display = 'none';
                             rightArrow.style.display = 'block';
@@ -491,7 +501,7 @@
                             leftArrow.style.display = 'block';
                             rightArrow.style.display = 'none';
                         }
-                    } else { // If pin is in front
+                    } else { 
                         const pinProjected = pinWorldPosition.clone().project(camera);
                         if (pinProjected.x < -0.9) {
                             leftArrow.style.display = 'block';
